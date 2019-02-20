@@ -13,8 +13,11 @@ import pandas as pd
 import numpy as np
 from optparse import OptionParser
 from collections import namedtuple
-from GenomeBin import GenomeBin, ContaminationRecordManager, ContaminationRecord
-from multiprocessing import Pool, Queue, Manager
+
+# My functions and classes
+from scripts.ThreadManager import ThreadManager
+from scripts.GenomeBin import GenomeBin, ContaminationRecordManager, ContaminationRecord
+from scripts.OptionValidator import ValidateFile, ValidateInteger, ValidateFloat
 
 def main():
     
@@ -28,36 +31,30 @@ def main():
     parser.add_option('-t', '--threads', help='Number of threads', dest='threads', default=1)
     options, binNames = parser.parse_args()
 
-    # Pre-multithreading workflow
-    ''' Parse the input files - the GenomeBin function returns None if it can't parse anything.
-        Finally, insantiate a container for all contamination occurrances. '''
+    ''' Validate user choices '''
+    options.vizbinTable = ValidateFile(inFile=options.vizbinTable, fileTypeWarning='vizbin table', behaviour='abort')
+    options.threads = ValidateInteger(userChoice=options.thread, parameterNameWarning='threads', behaviour='default', defaultValue=1)
+    options.biasThreshold = ValidateFloat(userChoice=options.biasThreshold, parameterNameWarning='bias threshold', behaviour='default', defaultValue=0.9)
 
-    ValidateVizBin(options.vizbinTable)
-    ValidateThreads(options.threads) # TO DO
-    options.biasThreshold = ValidateBias(options.biasThreshold)
-
-    queueManager, poolManager = InstantiateMultithreadingParameters(2)
-
+    ''' Parse the values into a list of per-bin settings '''
     binPrecursors = GenomeBin.ParseStartingVariables(options.vizbinTable, options.slices, binNames)
-    if not binPrecursors: TerminateScript('Unable to locate any valid contig lists. Aborting...')
+
+    if not binPrecursors:
+        print('Unable to locate any valid contig lists. Aborting...')
+        sys.exit()
+
     binInstances = [ GenomeBin(bP) for bP in binPrecursors ]
 
-    ''' This is where multithreading will come in later one '''
+    ''' Distribute the jobs over the threads provided '''
+    tManager = ThreadManager(nThreads, RefineAndPlotBin)
+    funcArgList = [ (bI, tManager.queue) for bI in binInstances ]
+    tManager.ActivateMonitorPool(sleepTime=30, funcArgs=funcArgList, trackingString='Completed MCC growth for {} of {} bins.', totalJobSize=len(funcArgList))
 
-    for binInstance in binInstances:
-
-        print( 'Calculating scores for {}'.format(binInstance.binIdentifier) )
-        binInstance.ComputeCloudPurity(queueManager) # this will be refactored on mp rewrite.
-        GenomeBin.PlotTrace(binInstance)
-        GenomeBin.PlotContours(binInstance)
-        #GenomeBin.SaveMccTable(binInstance)
-
-    ''' Ready for detangling stage.
-        Start by draining out the queueManager of all results ''' 
+    ''' Parse the results into the contamination record '''    
     contaminationInstanceRecord = ContaminationRecordManager()
-    for cR in ExtractQueueResults(queueManager):
+    for cR in tManager.results:
         contaminationInstanceRecord.AddRecord(cR)
-
+        
     contaminationInstanceRecord.IndexRecords()
     contaminationInstanceRecord.CalculateContigDistributions(options.vizbinTable)
 
@@ -71,42 +68,16 @@ def main():
 
 ###############################################################################
 
-#region Validation functions
-#
-# Functions to confirm all input data is correct, and terminate script execution if not.
-#
-def ValidateVizBin(vbTable):
-    if not vbTable: TerminateScript('Unable to proceed without a vizbin table.')
-    if not os.path.isfile(vbTable): TerminateScript('Unable to open vizbin table.')
+#region Bin refinement functions
 
-def ValidateThreads(nThreads):
-    return True
+def RefineAndPlotBin(argTuple):
 
-def ValidateBias(biasThreshold):
-    try:
-        biasThreshold = float(biasThreshold)
-    except:
-        TerminateScript('Unable to parse bias threshold to a decimal value.')
-    
-    if biasThreshold > 1.0: biasThreshold /=  100 
-    return biasThreshold
+    binInstance, q = argTuple
 
-def TerminateScript(oMsg):
-    print(oMsg)
-    sys.exit()
-#endregion
-
-#region multithreading management functions
-def InstantiateMultithreadingParameters(nThreads):
-    q = Manager().Queue()
-    p = Pool(nThreads)
-    return q, p
-
-def ExtractQueueResults(q):
-    yield q.get()
-    while not q.empty():
-        yield q.get(True)
-
+    binInstance.ComputeCloudPurity(q)
+    GenomeBin.PlotTrace(binInstance)
+    GenomeBin.PlotContours(binInstance)
+    #GenomeBin.SaveMccTable(binInstance)
 
 #endregion
 
