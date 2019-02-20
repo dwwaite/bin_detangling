@@ -5,6 +5,8 @@ from collections import Counter
 from optparse import OptionParser
 from sklearn import preprocessing
 from scripts.ThreadManager import ThreadManager
+from scripts.OptionValidator import ValidateFile, ValidateStringParameter, ValidateInteger
+from scripts.SequenceManipulation import IndexFastaFile
 
 def main():
 
@@ -22,81 +24,41 @@ def main():
     options, inputFiles = parser.parse_args()
 
     ''' Validate any user-specified variables '''
-    if options.coverage: options.coverage = Validatecoverage(options.coverage)
-    options.normalise = ValidateNormalisation(options.normalise)
-    options.threads = ValidateNumeric(options.threads, 'threads', 1)
-    options.kmer = ValidateNumeric(options.kmer, 'kmer', 4)
+    if options.coverage: options.coverage = ValidateFile(inFile=options.coverage, fileTypeWarning='coverage file', behaviour='skip')
+
+    options.normalise = ValidateStringParameter(userChoice=options.normalise,
+                                                choiceTypeWarning='coverage file',
+                                                allowedOptions=['unit', 'yeojohnson', 'none'],
+                                                behaviour='default', defBehaviour='unit')
+
+    options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
+    options.kmer = ValidateInteger(userChoice=options.kmer, parameterNameWarning='kmer', behaviour='default', defaultValue=4)
 
     ''' Generally I'll only run this one file at a time, but option is there for more '''
     for inputFile in inputFiles:
 
-        ''' Check it exists... '''
-        if not os.path.isfile(inputFile):
-            print( 'Unable to open file {}, skipping...'.format(inputFile) )
+        if not ValidateFile(inFile=inputFile, fileTypeWarning='fasta file', behaviour='skip'):
             continue
 
         ''' Read in and index the fasta contents '''
         sequenceIndex = IndexFastaFile(inputFile)
 
         ''' These functions are self-describing, so minimal commenting needed here '''
-        kmerFrequencyTable = ComputeKmerTable(sequenceIndex, options.threads, options.kmer)
-        contigNames, kmerDataFrame = OrderColumns(kmerFrequencyTable)
+        kmerDataFrame = ComputeKmerTable(sequenceIndex, options.threads, options.kmer)
+        kmerDataFrame = OrderColumns(kmerDataFrame)
 
         if options.revComp:
             kmerDataFrame = ReverseComplement(kmerDataFrame)
 
-        completeDataFrame = BuildFinalOutput(kmerDataFrame, contigNames)
-
         if options.coverage:
-            completeDataFrame = AppendCoverageTable(completeDataFrame, options.coverage)
+            kmerDataFrame = AppendCoverageTable(kmerDataFrame, options.coverage)
 
-        completeDataFrame = NormaliseColumnValues(completeDataFrame, options.normalise)
+        completeDataFrame = NormaliseColumnValues(kmerDataFrame, options.normalise)
         WriteOutputTable(inputFile, completeDataFrame, options.esomana)
 
 ###############################################################################
 
-#region Validation functions, to check inputs
-
-def Validatecoverage(covFile):
-    if os.path.isfile(covFile):
-        return covFile
-    else:
-        print( 'Warning: Unable to detect coverage file {}, skipping....'.format(covFile) )
-        return None
-
-def ValidateNormalisation(normChoice):
-
-    validOptions = set( ['unit', 'yeojohnson', 'none'] )
-
-    if normChoice.lower() in validOptions:
-        return normChoice.lower()
-
-    else:
-        print( 'Warning: Unable to parse normalisaton choice {}, using unit variance instad.'.format(normChoice) )
-        return 'unit'
-
-def ValidateNumeric(submittedValue, parameterName, defaultValue):
-    try:
-        i = int(submittedValue)
-        return i
-    except:
-        print( 'Unable to accept value {} for parameter {}, using default ({}) instead.'.format(submittedValue, parameterName, defaultValue) )
-        return defaultValue
-
-#endregion
-
 #region Fasta and sequence handling
-
-def IndexFastaFile(fileName):
-    content = open(fileName, 'r').read()
-    content = content.split('>')[1:]
-    index = {}
-    for entry in content:
-        entry = entry.split('\n')
-        contig = entry[0]
-        sequence = ''.join(entry[1:])
-        index[contig] = sequence
-    return index
 
 def ComputeKmerTable(sequenceDict, nThreads, kSize):
 
@@ -136,19 +98,23 @@ def CreateKmerRecord(orderedArgs):
 def ReverseComplement(naiveTable):
 
     refinedTable = pd.DataFrame()
+    refinedTable['Contig'] = naiveTable.Contig
 
-    ''' Instantiate the lookup dict here, so that it's not instantiated for every kmer in the DataFrame '''
+    ''' Instantiate the lookup dict here, so that rebuilt for every kmer in the DataFrame '''
     ntLookup = { 'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C' }
     
-    ''' Only consider kmers in the original DataFrame
-        This means we don't end up with empty columns in the end result. '''
+    ''' Only consider kmers in the original DataFrame, so there are no empty columns in the end result. '''
     addedKmers = set()
-    for kmer in naiveTable.columns:
+
+    for kmer in naiveTable.columns[1:]:
+
         rKmer = _computeSequenceComplement(kmer, ntLookup)
+
         if rKmer in addedKmers:
             refinedTable[rKmer] += naiveTable[kmer]
         else:
             refinedTable[kmer] = naiveTable[kmer]
+
         addedKmers.add(kmer)
 
     return refinedTable
@@ -164,9 +130,10 @@ def _computeSequenceComplement(sequence, lookupDict):
 
 def OrderColumns(df):
     colNames = list(df.columns)
-    colValues = df.loc[:,'Contig']
     colNames.remove('Contig')
-    return colValues, df[sorted(colNames)]
+    colNames = sorted(colNames)
+    colNames.insert(0, 'Contig')
+    return df[colNames]
 
 def NormaliseColumnValues(df, normFactor):
 
@@ -185,22 +152,20 @@ def NormaliseColumnValues(df, normFactor):
         return df
     elif normFactor == 'yeojohnson':
 
-        ''' Taken from https://scikit-learn.org/stable/modules/preprocessing.html
+        '''
+            Taken from https://scikit-learn.org/stable/modules/preprocessing.html
             Since df has already been sorted, can just do an iloc slice of the values.
-            Fits and transforms for each feature (column) '''
+        '''
         pt = preprocessing.PowerTransformer(method='yeo-johnson', standardize=True)
         normArray = pt.fit_transform( df.iloc[ : , 1: ] )
 
         ''' Recast the data as a DataFrame and return'''
         normDf = pd.DataFrame(normArray, columns=colsToTransform)
-        return BuildFinalOutput(normDf, df['Contig'])
+        normDf.insert(loc=0, column='Contig', value=contigNames)
+        return normDf
     else:
         ''' Otherwise, none must have been chosen, return the frame unchanged. '''
         return df
-
-def BuildFinalOutput(df, contigNames):
-    df.insert(loc=0, column='Contig', value=contigNames)
-    return df
 
 def AppendCoverageTable(df, covFile):
 
