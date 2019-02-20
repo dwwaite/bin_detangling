@@ -1,10 +1,10 @@
-import sys, os, time
+import sys, os
 import pandas as pd
 import numpy as np
 from collections import Counter
 from optparse import OptionParser
 from sklearn import preprocessing
-from multiprocessing import Pool, Queue, Manager
+from scripts.ThreadManager import ThreadManager
 
 def main():
 
@@ -16,13 +16,13 @@ def main():
     parser.add_option('-r', '--ignore-rev-comp', help='Prevent the use of reverse complement kmers to reduce table size (Default: False)', dest='revComp', action='store_false', default=True)
 
     ''' Options for making this ESOM-ready'''
-    parser.add_option('-c', '--coverage', help='Append coverage table to data (Default: None)', dest='coverage', default='')
+    parser.add_option('-c', '--coverage', help='Append coverage table to data (Default: None)', dest='coverage', default=None)
     parser.add_option('--to-esomana', help='Add ESOMana prefix to the output table (Default: False)', dest='esomana', action='store_true', default=False)
 
     options, inputFiles = parser.parse_args()
 
     ''' Validate any user-specified variables '''
-    options.coverage = Validatecoverage(options.coverage)
+    if options.coverage: options.coverage = Validatecoverage(options.coverage)
     options.normalise = ValidateNormalisation(options.normalise)
     options.threads = ValidateNumeric(options.threads, 'threads', 1)
     options.kmer = ValidateNumeric(options.kmer, 'kmer', 4)
@@ -38,52 +38,22 @@ def main():
         ''' Read in and index the fasta contents '''
         sequenceIndex = IndexFastaFile(inputFile)
 
-        ''' Distribute the contigs over the number of threads, then reverse complement the kmer table if required. '''
-        completeDataFrame = DistributeKmerLoad(sequenceIndex, options.threads, options.kmer)
-        contigNames, kmerDataFrame = OrderColumns(completeDataFrame)
+        ''' These functions are self-describing, so minimal commenting needed here '''
+        kmerFrequencyTable = ComputeKmerTable(sequenceIndex, options.threads, options.kmer)
+        contigNames, kmerDataFrame = OrderColumns(kmerFrequencyTable)
+
         if options.revComp:
             kmerDataFrame = ReverseComplement(kmerDataFrame)
 
-        ''' Stitch the contigs values back in '''
         completeDataFrame = BuildFinalOutput(kmerDataFrame, contigNames)
 
-        ''' If a coverage file was specified, add it '''
-        completeDataFrame = AppendCoverageTable(completeDataFrame, options.coverage)
+        if options.coverage:
+            completeDataFrame = AppendCoverageTable(completeDataFrame, options.coverage)
 
-        ''' Perform row normalisation if needed '''
         completeDataFrame = NormaliseColumnValues(completeDataFrame, options.normalise)
-
-        ''' Write the output file '''
         WriteOutputTable(inputFile, completeDataFrame, options.esomana)
 
 ###############################################################################
-
-# region Multithread handling
-
-def DistributeKmerLoad(sequenceDict, nThreads, kSize):
-
-    poolManager, queueManager = _spawnThreadHandlers(nThreads)
-    tracker = poolManager.map_async(CreateKmerRecord, [ (contig, sequence, kSize, queueManager) for (contig, sequence) in sequenceDict.items() ])
-        
-    ''' Move into a holding loop while processing. No user feedback at this stage, just a 15 sec check '''
-    while not tracker.ready():
-        time.sleep(15) 
-
-    ''' When the contig processing completes, parse the queueManager into a list, then cast into a DataFrame '''
-    inputList = [ cResult for cResult in _extractQueueResults(queueManager) ]
-    return pd.DataFrame(inputList).fillna(0.0)
-
-def _spawnThreadHandlers(nThreads):
-    p = Pool(nThreads)
-    q = Manager().Queue()
-    return p, q
-
-def _extractQueueResults(q):
-    yield q.get()
-    while not q.empty():
-        yield q.get(True)
-
-#endregion
 
 #region Validation functions, to check inputs
 
@@ -128,6 +98,18 @@ def IndexFastaFile(fileName):
         index[contig] = sequence
     return index
 
+def ComputeKmerTable(sequenceDict, nThreads, kSize):
+
+    tManager = ThreadManager(nThreads, CreateKmerRecord)
+
+    ''' Prime a list of arguments to distribute over the threads, then execute '''
+    funcArgList = [ (contig, sequence, kSize, tManager.queue) for (contig, sequence) in sequenceDict.items() ]
+    tManager.ActivateMonitorPool(sleepTime=15, funcArgs=funcArgList)
+
+    ''' Extract the results, as return as a DataFrame '''
+    inputList = tManager.results
+    return pd.DataFrame(inputList).fillna(0.0)
+
 def CreateKmerRecord(orderedArgs):
 
     ''' Unpack the arguments from tuple to variables'''
@@ -135,7 +117,7 @@ def CreateKmerRecord(orderedArgs):
         contig, sequence, kSize, q = orderedArgs
 
         ''' Walk through the sequence as kmer steps and record abundance.
-            Omit any results with ambiguous sequences since these are sequencing/assembly error, not biological signal '''
+            Omit any results with ambiguous sequences since these are not biological signal '''
         kmerMap = []
         for i in range(0, len(sequence)-kSize+1):
             kmer = sequence[i:i+kSize]
