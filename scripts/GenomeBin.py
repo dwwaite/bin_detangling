@@ -16,26 +16,26 @@ class GenomeBin:
 
         self.binIdentifier = binInstanceTuple.binIdent
 
-        self._vbTable = pd.read_csv(binInstanceTuple.vizbinPath, sep='\t')
+        self._eTable = pd.read_csv(binInstanceTuple.esomPath, sep='\t')
         
-        self.binPoints = self._vbTable[ self._vbTable.BinID == binInstanceTuple.binIdent ]
-        self.nonbinPoints = self._vbTable[ self._vbTable.BinID != binInstanceTuple.binIdent ]
+        self.binPoints = self._eTable[ self._eTable.BinID == binInstanceTuple.binIdent ]
+        self.nonbinPoints = self._eTable[ self._eTable.BinID != binInstanceTuple.binIdent ]
         self.binPoints._is_copy = None # Just silence the slice warnings
         self.nonbinPoints._is_copy = None
 
         ''' Add variables for internal use '''
         self._numSlices = binInstanceTuple.numSlices
-        self._coreContigs = None
         self._mccValues = [None] * self._numSlices
         self._simplexArea = [None] * self._numSlices
         self._simplexPerimeter = [None] * self._numSlices
         self._qHulls = [None] * self._numSlices
         self._sliceArray = [None] * self._numSlices
         self._contaminatingPoints = None
+        self._bestSlice = -1
         self._outputPath = binInstanceTuple.outputPath
 
         ''' Set a variable of the expected contig membership for MCC calculation '''
-        self._expectedContigs = [ 1 if x == self.binIdentifier else 0 for x in self._vbTable.BinID ]
+        self._expectedContigs = [ 1 if x == self.binIdentifier else 0 for x in self._eTable.BinID ]
 
         ''' Organise the binPoints according to distance from centroid
             For each contig, map the displacement band from the centroid that it falls into '''
@@ -77,6 +77,7 @@ class GenomeBin:
 
         ''' Cache the contaminating contigs and parent bin as they get observed '''
         contaminationMarkerStore = []
+        topMcc = -1
 
         for i, sliceSize in enumerate(self.sliceSequence):
 
@@ -85,12 +86,16 @@ class GenomeBin:
 
             ''' Identify contaminant contigs, log them for future use '''
             dHull = Delaunay(self._sliceArray[i])
+
             obsBins, contamContigs = self._returnContaminatingContigs(dHull, nonbinArraySlice)
             contaminationMarkerStore.append( (obsBins, contamContigs) )
 
             ''' Calculate the MCC '''
             obsContigs = self._resolveObservedArray(binDfSlice.ContigName, contamContigs)
             self._mccValues[i] = matthews_corrcoef(self._expectedContigs, obsContigs)
+            if self._mccValues[i] >= topMcc:
+                self._bestSlice = i
+                topMcc = self._mccValues[i]
 
             ''' Record the perimeter and area of the point slice. Note that these are special cases of
                 the QHull object for a 2D shape. If we project to more dimensions, this will no longer be valid '''
@@ -98,27 +103,37 @@ class GenomeBin:
             self._simplexArea[i] = self._qHulls[i].volume
             self._simplexPerimeter[i] = self._qHulls[i].area
 
-        ''' Log the contaminating contig points for plotting purposes '''
-        self._contaminatingPoints =  self.nonbinPoints[ self.nonbinPoints['ContigName'].isin(contamContigs) ]
+        ''' Log the contaminating contig points at the final extension for plotting purposes '''
+        if contamContigs:
+            self._contaminatingPoints =  self.nonbinPoints[ self.nonbinPoints['ContigName'].isin(contamContigs) ]
+        else:
+            self._contaminatingPoints = None
 
-        ''' Log each contig that was found within the MCC-maximising bound of the bin
-            Also log the contigs that fall within this sliceBand as the core '''
-        obsBins, contamContigs = contaminationMarkerStore[ self.bestSlice ]
-        bestSliceValue = self.sliceSequence[ self.bestSlice ]
-        self._coreContigs = self.binPoints[ self.binPoints.SliceBand <= bestSliceValue ].ContigBase.unique()
+        ''' Log each contaminating contig that was found within this slice '''
+        obsBins, contamContigs = contaminationMarkerStore[ self._bestSlice ]
 
-        for binName, contigFragment in zip(obsBins, contamContigs):
-            qManager.put( ContaminationRecord(binName, contigFragment, bestSliceValue, self.binIdentifier) )
+        if contamContigs:
+            for binName, contigFragment in zip(obsBins, contamContigs):
+                qManager.put( ContaminationRecord(binName, contigFragment, self.sliceSequence[ self._bestSlice ], self.binIdentifier) )
 
     def DropContig(self, contigName):
+        print( self.binPoints.shape)
         self.binPoints = self.binPoints[ self.binPoints.ContigBase != contigName ]
+        print( self.binPoints.shape)
 
+    def to_string(self):
+        return 'Name: {}, Contigs: {}, Best MCC: {}, '.format(self.binIdentifier, len(self.binPoints.ContigBase.unique()), self._mccValues[ self._bestSlice ])
     #endregion
 
     #region Internal manipulation functions
     def _resolveObservedArray(self, targetSlice, nontargetSlice):
-        binnedContigs = set(targetSlice) | set(nontargetSlice)
-        return [ 1 if x in binnedContigs else 0 for x in self._vbTable.ContigName  ]
+
+        binnedContigs = set(targetSlice)
+
+        ''' Need a bit of flow control here, to account for no contaminating contigs '''
+        if nontargetSlice: binnedContigs = binnedContigs | set(nontargetSlice)
+
+        return [ 1 if x in binnedContigs else 0 for x in self._eTable.ContigName  ]
 
     def _returnContaminatingContigs(self, delaunayHullObj, nonbinPointArray):
 
@@ -129,7 +144,7 @@ class GenomeBin:
             return list(contamEvents.BinID), list(contamEvents.ContigName)
 
         else:
-            return None
+            return None, None
 
     #endregion
 
@@ -167,28 +182,33 @@ class GenomeBin:
 
     @property
     def coreContigs(self):
-        return list(self._coreContigs)
+        bestSliceValue = self.sliceSequence[ self._bestSlice ]
+        contigs = list (self.binPoints[ self.binPoints.SliceBand <= bestSliceValue ].ContigBase.unique() )
+        if contigs:
+            return contigs
+        else:
+            return None
 
     #endregion
 
     #region Static functions
 
     @staticmethod
-    def ParseStartingVariables(vbPath, nSlices, binNames):
+    def ParseStartingVariables(ePath, nSlices, binNames):
 
         ''' Just a QoL method for pre-formating the input data for constructing GenomeBin objects.
             Allows for a nice way to terminate the script early if there are path issues, before getting to the actual grunt work '''
 
-        binDataLoader = namedtuple('binDataLoader', 'vizbinPath binIdent numSlices outputPath')
+        binDataLoader = namedtuple('binDataLoader', 'esomPath binIdent numSlices outputPath')
         dataStore = []
 
-        vbTable = pd.read_csv(vbPath, sep='\t')
-        validBins = set( vbTable.BinID.unique() )
+        esomTable = pd.read_csv(ePath, sep='\t')
+        validBins = set( esomTable.BinID.unique() )
 
         for bN in binNames:
 
             if bN in validBins:
-                b = binDataLoader(vizbinPath=vbPath, binIdent=bN, numSlices=nSlices, outputPath=bN + '.refined')
+                b = binDataLoader(esomPath=ePath, binIdent=bN, numSlices=nSlices, outputPath=bN + '.refined')
                 dataStore.append(b)
 
             else:
@@ -263,10 +283,16 @@ class GenomeBin:
 
     @staticmethod
     def SaveCoreContigs(gBin):
-        outputWriter = open(gBin._outputPath + '.contigs.txt', 'w')
-        contigText = '\n'.join( gBin.coreContigs )
-        outputWriter.write( contigText )
-        outputWriter.close()
+
+        if gBin.coreContigs:
+
+            outputWriter = open(gBin._outputPath + '.contigs.txt', 'w')
+            contigString = '\n'.join(gBin.coreContigs) + '\n'
+            outputWriter.write(contigString)
+            outputWriter.close()
+        
+        else:
+            print( '\tNo contigs remain in {}, skipping...'.format(gBin.binIdentifier) )
 
     #endregion
 
@@ -292,15 +318,15 @@ class ContaminationRecordManager():
     def IndexRecords(self):
         self._recordFrame = pd.DataFrame(self._preframeRecords)
 
-    def CalculateContigDistributions(self, vizbinTablePath):
+    def CalculateContigDistributions(self, esomTablePath):
 
-        vizbinTable = pd.read_csv(vizbinTablePath, sep='\t')
+        esomTable = pd.read_csv(esomTablePath, sep='\t')
         contaminationSummary = namedtuple('contaminationSummary', 'originalBin totalFragments contamBin contamAbund carrierBins contigName')
 
         for contamContig in self._recordFrame.Contig.unique():
 
             ''' Find where the contig currently sits, and get the total number of fragments '''
-            globalSlice = vizbinTable[ vizbinTable.ContigBase == contamContig ]
+            globalSlice = esomTable[ esomTable.ContigBase == contamContig ]
             currentBin = globalSlice.BinID.unique()[0]
             totalFragments = globalSlice.shape[0]
 
@@ -325,9 +351,12 @@ class ContaminationRecordManager():
 
         for contamEvent in self._contigDistributionRecords:
 
+                print(contamEvent)
                 if float(contamEvent.contamAbund) / contamEvent.totalFragments > biasThreshold:
+                    print( binInstanceDict[ contamEvent.originalBin ].binIdentifier )
                     binInstanceDict[ contamEvent.originalBin ].DropContig(contamEvent.contigName)
                 else:
+                    print( binInstanceDict[ contamEvent.contamBin ].binIdentifier )
                     binInstanceDict[ contamEvent.contamBin ].DropContig(contamEvent.contigName)
 
                 for carrierBin in contamEvent.carrierBins:
@@ -347,3 +376,6 @@ class ContaminationRecord():
         self.contigFragmentName = contigFragmentName
         self.centroidDisplacementBand = centroidDisplacementBand
         self.contaminationBin = contaminationBinName
+
+    def to_string(self):
+        print( 'Bin: {}, contig ({}) from bin {}'.format(self.originalBin, self.contigName, self.contaminationBin) )

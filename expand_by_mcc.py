@@ -25,19 +25,19 @@ def main():
     parser = OptionParser()
     usage = "usage: %prog [options] [starter-bin fasta files]"
 
-    parser.add_option('-v', '--vizbinTable', help='A vizbin table produced by the vizbin_FilesToTable.py script', dest='vizbinTable')
+    parser.add_option('-e', '--esom-table', help='A vizbin table produced by the vizbin_FilesToTable.py script', dest='esomTable')
     parser.add_option('-s', '--slices', help='Number of slices of each bin to take, projected across the asymptotic function [1 - (1 / (1 + s))] Default = 50', dest='slices', default=50)
     parser.add_option('-b', '--bias-threshold', help='The weighting at which contigs are assigned to a bin when fragments appear across multiple bins (Default 0.9)', dest='biasThreshold', default=0.9)
     parser.add_option('-t', '--threads', help='Number of threads', dest='threads', default=1)
     options, binNames = parser.parse_args()
 
     ''' Validate user choices '''
-    options.vizbinTable = ValidateFile(inFile=options.vizbinTable, fileTypeWarning='vizbin table', behaviour='abort')
-    options.threads = ValidateInteger(userChoice=options.thread, parameterNameWarning='threads', behaviour='default', defaultValue=1)
+    options.esomTable = ValidateFile(inFile=options.esomTable, fileTypeWarning='ESOM table', behaviour='abort')
+    options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
     options.biasThreshold = ValidateFloat(userChoice=options.biasThreshold, parameterNameWarning='bias threshold', behaviour='default', defaultValue=0.9)
 
     ''' Parse the values into a list of per-bin settings '''
-    binPrecursors = GenomeBin.ParseStartingVariables(options.vizbinTable, options.slices, binNames)
+    binPrecursors = GenomeBin.ParseStartingVariables(options.esomTable, options.slices, binNames)
 
     if not binPrecursors:
         print('Unable to locate any valid contig lists. Aborting...')
@@ -46,19 +46,20 @@ def main():
     binInstances = [ GenomeBin(bP) for bP in binPrecursors ]
 
     ''' Distribute the jobs over the threads provided '''
-    tManager = ThreadManager(nThreads, RefineAndPlotBin)
+    tManager = ThreadManager(options.threads, RefineAndPlotBin)
     funcArgList = [ (bI, tManager.queue) for bI in binInstances ]
-    tManager.ActivateMonitorPool(sleepTime=30, funcArgs=funcArgList, trackingString='Completed MCC growth for {} of {} bins.', totalJobSize=len(funcArgList))
+    #tManager.ActivateMonitorPool(sleepTime=30, funcArgs=funcArgList, trackingString='Completed MCC growth for {} of {} bins.', totalJobSize=len(funcArgList))
+    tManager.ActivateMonitorPool(sleepTime=1, funcArgs=funcArgList)
 
-    ''' Parse the results into the contamination record '''    
-    contaminationInstanceRecord = ContaminationRecordManager()
-    for cR in tManager.results:
-        contaminationInstanceRecord.AddRecord(cR)
+    ''' Parse the results into the contamination record '''
+    contaminationInstanceRecord = PopulateContaminationRecords(tManager.results) 
         
     contaminationInstanceRecord.IndexRecords()
-    contaminationInstanceRecord.CalculateContigDistributions(options.vizbinTable)
+    contaminationInstanceRecord.CalculateContigDistributions(options.esomTable)
 
     ''' Recasting the binInstances list as a dict, so I can access specific bins at will '''
+    for bI in binInstances:
+        print( bI.to_string() )
     binInstances = { bI.binIdentifier: bI for bI in binInstances }
     revisedBinInstances = contaminationInstanceRecord.ResolveContaminationByAbundance(binInstances, options.biasThreshold)
 
@@ -74,10 +75,24 @@ def RefineAndPlotBin(argTuple):
 
     binInstance, q = argTuple
 
-    binInstance.ComputeCloudPurity(q)
-    GenomeBin.PlotTrace(binInstance)
-    GenomeBin.PlotContours(binInstance)
-    #GenomeBin.SaveMccTable(binInstance)
+    try:
+
+        binInstance.ComputeCloudPurity(q)
+        GenomeBin.PlotTrace(binInstance)
+        GenomeBin.PlotContours(binInstance)
+        #GenomeBin.SaveMccTable(binInstance)
+
+    except:
+        print( 'Error processing bin {}, skipping...'.format(binInstance.binIdentifier) )
+
+def PopulateContaminationRecords(resultsList):
+
+    cIR = ContaminationRecordManager()
+
+    for cR in resultsList:
+        cIR.AddRecord(cR)
+
+    return cIR
 
 #endregion
 
