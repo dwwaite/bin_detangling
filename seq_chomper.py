@@ -1,65 +1,109 @@
 '''
-    A simple script to chomp up contigs into smaller pieces for use in ESOM clustering.
-
-    First argument is the contig fragment size to chop to, subsequent arguments are bin files.
+    A simple script to chomp up contigs into smaller pieces for use in ESOM clustering. Where multiple fasta files are placed together, they are pooled into a single file.
 '''
 import sys, os
+from optparse import OptionParser
+
+# My scripts
+from scripts.OptionValidator import ValidateFile, ValidateStringParameter, ValidateInteger
+from scripts.SequenceManipulation import IndexFastaFile
 
 def main():
 
-    cSize = sys.argv[1]
-    try:
-        cSize = int(cSize)
-    except:
-        print( 'Unable to convert contig size ({}) to an integer. Aborting...'.format(cSize) )
-        sys.exit()
 
-    # Can change if needed.
-    fOutput = 'vizbin.fna'
-    aOutput = 'vizbin.ann'
+    ''' Set up the options '''
+    parser = OptionParser()
+    parser.add_option('-c', '--contig-size', help='Size to chop contigs', dest='contigSize', default=1500)
 
-    binFiles = sys.argv[2:]
-    ProcessVizBinInputs(binFiles, fOutput, aOutput, cSize)
+    options, inputFiles = parser.parse_args()
+
+    ''' Validate inputs '''
+    options.contigSize = ValidateInteger(userChoice=options.contigSize, parameterNameWarning='contig size', behaviour='default', defaultValue=1500)
+
+    ''' Set output file names '''
+    fastaOutputName, fastaWriter = OpenFastaStream(inputFiles[0], options.contigSize)
+    binRecordWriter = OpenBinRecordWriter(inputFiles, fastaOutputName)
+
+    for inputFile in inputFiles:
+
+        if not ValidateFile(inFile=inputFile, fileTypeWarning='fasta file', behaviour='skip'):
+            continue
+
+        ProcessFastaFile(inputFile, fastaWriter, options.contigSize, binRecordWriter)
 
 ###############################################################################
-def FastaAsTuples(_binName):
-    content = open(_binName, 'r').read().split('>')[1:]
-    ret = []
-    for c in content:
-        head, *seq = c.split('\n')
-        seq = ''.join( list(seq) )
-        ret.append( (head, seq) )
-    return ret
 
-def ChompSeq(sequence, size):
+# region File name handlers
+
+def OpenFastaStream(infileName, contigSize):
+    infBase, infExt = os.path.splitext(infileName)
+    fastaName = '{}.chomp{}{}'.format(infBase, contigSize, infExt)
+    return fastaName, open(fastaName, 'w')
+
+def OpenBinRecordWriter(inputFiles, fastaName):
+
+    if len(inputFiles) <= 1:
+        return None
+
+    else:
+
+        fExt = os.path.splitext(fastaName)[1]
+        return open(fastaName.replace(fExt, '.txt'), 'w')
+
+# endregion
+
+# region Sequence cutting
+
+def MakeSequenceCuts(sequence, size):
     chopStart = 0
     while(chopStart + size < len(sequence) - chopStart):
         yield sequence[chopStart:(chopStart + size)]
         chopStart += size
     yield sequence[chopStart:]
 
-def ChompifySequences(chompSize, binName):
-    for seqName, seq in FastaAsTuples(binName):
+def ChompSequences(chompSize, binName):
+
+    fastaContent = IndexFastaFile(binName)
+
+    for seqName, seq in fastaContent.items():
+
+        ''' If the sequence is longer than the cutting size, slice it up.
+            If not, just return it with a modified name. '''
         if len(seq) > chompSize:
-            for i, seqSlice in enumerate( ChompSeq(seq, chompSize) ):
-                chompName = '{}|{}'.format(seqName, i)
-                yield (chompName, seqSlice)
+
+            seqBuffer = ''
+            chompNameBuffer = ''
+            for i, seqSlice in enumerate( MakeSequenceCuts(seq, chompSize) ):
+
+                chompNameBuffer = '{}|{}'.format(seqName, i)
+
+                if len(seqBuffer) > chompSize:
+
+                    ''' If the fragment is greater than or equal to the limit, release the previous sequence '''
+                    yield (chompNameBuffer, seqBuffer)
+                    seqBuffer = seqSlice
+
+                else:
+
+                    ''' If the sequence fragment is not big enough, append it to the last fragment and release it
+                        This only happens on the last piece of a sequence, so no need to set the buffers again '''
+
+                    yield (chompNameBuffer, seqBuffer + seqSlice)
+                    
         else:
             yield '{}|{}'.format(seqName, 0), seq
 
-def ProcessVizBinInputs(_binFiles, _fastaStream, _annotStream, _chompFactor):
+# endregion
 
-    _fastaStream = open(_fastaStream, 'w')
-    _annotStream = open(_annotStream, 'w')
-    _annotStream.write('label\n')
+def ProcessFastaFile(binFile, fastaStream, contigSize, binStream = None):
 
-    for b in _binFiles:
-        for chompName, seq in ChompifySequences(_chompFactor, b):
-            _fastaStream.write( '>{}\n{}\n'.format(chompName, seq) )
-            _annotStream.write( '{}\n'.format(b) )
+    for seqName, seq in ChompSequences(contigSize, binFile):
 
-    _fastaStream.close()
-    _annotStream.close()
+        fastaStream.write( '>{}\n{}\n'.format(seqName, seq) )
+
+        if binStream:
+            binStream.write( '{}\t{}\n'.format(seqName, binFile) )
+
 ###############################################################################
 if __name__ == '__main__':
      main()

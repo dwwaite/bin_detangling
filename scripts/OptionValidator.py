@@ -14,12 +14,12 @@ def ValidateFile(inFile, fileTypeWarning, behaviour):
 
         if behaviour == 'skip':
 
-            print( 'Warning: Unable to detect {} {}, skipping....'.format(fileTypeWarning, covFile) )
+            print( 'Warning: Unable to detect {} {}, skipping....'.format(fileTypeWarning, inFile) )
             return None
 
         if behaviour == 'abort':
 
-            print( 'Warning: Unable to detect {} {}, aborting....'.format(fileTypeWarning, covFile) )
+            print( 'Warning: Unable to detect {} {}, aborting....'.format(fileTypeWarning, inFile) )
             sys.exit()
 
 def ValidateStringParameter(userChoice, choiceTypeWarning, allowedOptions, behaviour, defBehaviour=None):
@@ -46,9 +46,31 @@ def ValidateStringParameter(userChoice, choiceTypeWarning, allowedOptions, behav
             return defBehaviour
 
 def ValidateInteger(userChoice, parameterNameWarning, behaviour, defaultValue=None):
+
     try:
+
         i = int(userChoice)
         return i
+
+    except:
+
+        if behaviour == 'default':
+
+            print( 'Unable to accept value {} for {}, using default ({}) instead.'.format(userChoice, parameterNameWarning, defaultValue) )
+            return defaultValue
+
+        if behaviour == 'abort':
+
+            print( 'Unable to accept value {} for {}, aborting...'.format(userChoice, parameterNameWarning, defaultValue) )
+            sys.exit()
+
+def ValidateFloat(userChoice, parameterNameWarning, behaviour, defaultValue=None):
+
+    try:
+
+        f = float(userChoice)
+        return f
+
     except:
 
         if behaviour == 'default':

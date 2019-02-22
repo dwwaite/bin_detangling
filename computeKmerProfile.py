@@ -4,6 +4,8 @@ import numpy as np
 from collections import Counter
 from optparse import OptionParser
 from sklearn import preprocessing
+
+# My functions and classes
 from scripts.ThreadManager import ThreadManager
 from scripts.OptionValidator import ValidateFile, ValidateStringParameter, ValidateInteger
 from scripts.SequenceManipulation import IndexFastaFile
