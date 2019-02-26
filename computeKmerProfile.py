@@ -147,6 +147,8 @@ def NormaliseColumnValues(df, normFactor):
     colsToTransform = list( df.columns )
     colsToTransform.remove('Contig')
 
+    contigNames = df.Contig
+
     if normFactor == 'unit':
 
         ''' Straight out of the preprocessing.scale documentation. '''

@@ -64,6 +64,10 @@ def ValidateInteger(userChoice, parameterNameWarning, behaviour, defaultValue=No
             print( 'Unable to accept value {} for {}, aborting...'.format(userChoice, parameterNameWarning, defaultValue) )
             sys.exit()
 
+        if behaviour == 'skip':
+
+            return None
+
 def ValidateFloat(userChoice, parameterNameWarning, behaviour, defaultValue=None):
 
     try:
