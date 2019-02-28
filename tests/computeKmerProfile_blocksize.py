@@ -15,6 +15,7 @@ def main():
     ''' Set up the options '''
     parser = OptionParser()
     parser.add_option('-k', '--kmer', help='Kmer size for profiling (Default: 4)', dest='kmer', default=4)
+    parser.add_option('-b', help='Modify the number of sequences passed to each thread during kmer counting. Useful for profiling.', dest='blockSize', default=1)
     parser.add_option('-t', '--threads', help='Number of threads to use (Default: 1)', dest='threads', default=1)
     parser.add_option('-n', '--normalise', help='Method for normalising per-column values (Options: unit variance (\'unit\'), Yeo-Johnson (\'yeojohnson\'), None (\'none\'). Default: Unit variance)', dest='normalise', default='unit')
     parser.add_option('-r', '--ignore-rev-comp', help='Prevent the use of reverse complement kmers to reduce table size (Default: False)', dest='revComp', action='store_false', default=True)
@@ -35,6 +36,7 @@ def main():
 
     options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
     options.kmer = ValidateInteger(userChoice=options.kmer, parameterNameWarning='kmer', behaviour='default', defaultValue=4)
+    options.blockSize = ValidateInteger(userChoice=options.blockSize, parameterNameWarning='block size', behaviour='default', defaultValue=1)
 
     ''' Generally I'll only run this one file at a time, but option is there for more '''
     for inputFile in inputFiles:
@@ -46,7 +48,8 @@ def main():
         sequenceIndex = IndexFastaFile(inputFile)
 
         ''' These functions are self-describing, so minimal commenting needed here '''
-        kmerDataFrame = ComputeKmerTable(sequenceIndex, options.threads, options.kmer)
+        # Debugging - working out performance gains of sequence splitting.
+        kmerDataFrame = ComputeKmerTable(sequenceIndex, options.threads, options.kmer, blockSize=options.blockSize)
         kmerDataFrame = OrderColumns(kmerDataFrame)
 
         if options.revComp:
@@ -62,38 +65,57 @@ def main():
 
 #region Fasta and sequence handling
 
-def ComputeKmerTable(sequenceDict, nThreads, kSize):
+#def ComputeKmerTable(sequenceDict, nThreads, kSize):
+def ComputeKmerTable(sequenceDict, nThreads, kSize, blockSize):
 
     tManager = ThreadManager(nThreads, CreateKmerRecord)
 
     ''' Prime a list of arguments to distribute over the threads, then execute '''
-    funcArgList = [ (contig, sequence, kSize, tManager.queue) for (contig, sequence) in sequenceDict.items() ]
+    funcArgList = [ (contigs, sequences, kSize, tManager.queue) for (contigs, sequences) in _spawnSequenceBlocks(sequenceDict, blockSize) ]
     tManager.ActivateMonitorPool(sleepTime=15, funcArgs=funcArgList)
 
     ''' Extract the results, as return as a DataFrame '''
     inputList = tManager.results
     return pd.DataFrame(inputList).fillna(0.0)
 
+def _spawnSequenceBlocks(sDict, blockSize):
+
+    curIndex = 0
+    contigs = [None] * blockSize
+    sequences = [None] * blockSize
+    for c, s in sDict.items():
+
+        contigs[curIndex] = c
+        sequences[curIndex] = s
+
+        curIndex += 1
+        if curIndex == blockSize:
+            yield (contigs, sequences)
+            contigs = [None] * blockSize
+            sequences = [None] * blockSize
+            curIndex = 0
+
+    yield (contigs[0:curIndex], sequences[0:curIndex])
+
+
 def CreateKmerRecord(orderedArgs):
 
     ''' Unpack the arguments from tuple to variables'''
     try:
-        contig, sequence, kSize, q = orderedArgs
+        contigs, sequences, kSize, q = orderedArgs
 
-        ''' Walk through the sequence as kmer steps and record abundance.
-            Omit any results with ambiguous sequences since these are not biological signal '''
-        kmerMap = []
-        for i in range(0, len(sequence)-kSize+1):
-            kmer = sequence[i:i+kSize]
-            if not 'N' in kmer: kmerMap.append(kmer)          
+        for contig, sequence in zip(contigs, sequences):
+            kmerMap = []
+            for i in range(0, len(sequence)-kSize+1):
+                kmer = sequence[i:i+kSize]
+                if not 'N' in kmer: kmerMap.append(kmer)          
 
-        ''' Compress the kmerMap list into a dict, and insert the Contig name '''
-        kmerCounter = Counter(kmerMap)
-        totKmers = np.sum( [x for x in kmerCounter.values() ] )
-        kmerMap = { k: float(i) / totKmers for k, i in kmerCounter.items() }
-        kmerMap['Contig'] = contig
+            kmerCounter = Counter(kmerMap)
+            totKmers = np.sum( [x for x in kmerCounter.values() ] )
+            kmerMap = { k: float(i) / totKmers for k, i in kmerCounter.items() }
+            kmerMap['Contig'] = contig
 
-        q.put( kmerMap )
+            q.put( kmerMap )
 
     except:
         print( '\tError parsing conig \'{}\', skipping...'.format(contig) )
