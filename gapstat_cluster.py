@@ -95,6 +95,8 @@ def OptmiseClustering(featureTable, nThreads, minSize, maxSize, forceOpt):
     clustEngine = OptimalK(parallel_backend='multiprocessing', n_jobs=nThreads) if nThreads > 1 else OptimalK(parallel_backend='None')
 
     _, featureFrame = ExtractColumn(featureTable, 'Contig')
+
+    ''' Where multiple best-case instances are reported, the default behaviour is to return the higher number of clusters '''
     nClusters = clustEngine(featureFrame.values, cluster_array=np.arange(minSize, maxSize))
     return clustEngine, nClusters
 
