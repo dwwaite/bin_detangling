@@ -4,7 +4,9 @@
 import sys, os
 from collections import namedtuple
 
-def ValidateFile(inFile, fileTypeWarning, behaviour):
+# region File validation 
+
+def ValidateFile(inFile, behaviour, fileTypeWarning=None, _callback=None, **kwargs):
 
     if os.path.isfile(inFile):
 
@@ -12,15 +14,43 @@ def ValidateFile(inFile, fileTypeWarning, behaviour):
 
     else:
 
-        if behaviour == 'skip':
+        if behaviour == 'callback':
+
+            return _callback(kwargs)
+
+        elif behaviour == 'skip':
 
             print( 'Warning: Unable to detect {} {}, skipping....'.format(fileTypeWarning, inFile) )
             return None
 
-        if behaviour == 'abort':
+        elif behaviour == 'abort':
 
             print( 'Warning: Unable to detect {} {}, aborting....'.format(fileTypeWarning, inFile) )
             sys.exit()
+
+def ValidateFolder(inFile, behaviour, fileTypeWarning=None, _callback=None, **kwargs):
+
+    if os.path.isdir(inFile):
+
+        return inFile
+
+    else:
+
+        if behaviour == 'callback':
+
+            return _callback(kwargs)
+
+        elif behaviour == 'skip':
+
+            print( 'Warning: Unable to detect {} {}, skipping....'.format(fileTypeWarning, inFile) )
+            return None
+
+        elif behaviour == 'abort':
+
+            print( 'Warning: Unable to detect {} {}, aborting....'.format(fileTypeWarning, inFile) )
+            sys.exit()
+
+# endregion 
 
 def ValidateStringParameter(userChoice, choiceTypeWarning, allowedOptions, behaviour, defBehaviour=None):
 
@@ -44,6 +74,8 @@ def ValidateStringParameter(userChoice, choiceTypeWarning, allowedOptions, behav
 
             print( 'Warning: Unable to parse {} {}, using {} instead.'.format(choiceTypeWarning, userChoice, defBehaviour) )
             return defBehaviour
+
+# region Numeric validation
 
 def ValidateInteger(userChoice, parameterNameWarning, behaviour, defaultValue=None):
 
@@ -86,3 +118,5 @@ def ValidateFloat(userChoice, parameterNameWarning, behaviour, defaultValue=None
 
             print( 'Unable to accept value {} for {}, aborting...'.format(userChoice, parameterNameWarning, defaultValue) )
             sys.exit()
+
+# endregion

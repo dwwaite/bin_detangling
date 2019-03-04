@@ -26,7 +26,7 @@ def main():
     options, inputFiles = parser.parse_args()
 
     ''' Validate any user-specified variables '''
-    if options.coverage: options.coverage = ValidateFile(inFile=options.coverage, fileTypeWarning='coverage file', behaviour='skip')
+    if options.coverage: options.coverage = ValidateFile(inFile=options.coverage, behaviour='skip', fileTypeWarning='coverage file', )
 
     options.normalise = ValidateStringParameter(userChoice=options.normalise,
                                                 choiceTypeWarning='coverage file',
