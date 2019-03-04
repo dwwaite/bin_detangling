@@ -6,7 +6,6 @@ import sys, os, glob
 import numpy as np
 import pandas as pd
 from optparse import OptionParser
-from collections import namedtuple
 
 # Standard/science imports
 import matplotlib.pyplot as plt
@@ -32,42 +31,50 @@ def main():
 
     for buscoFolder in buscoFolders:
 
-        buscoDB, buscoPathObj = ValidateBuscoFolder( buscoFolder )
+        buscoDB, tblastnFile, shortSummaryFile = ValidateBuscoFolder( buscoFolder )
 
-        #if buscoPathObj:
-        blastTable = ImportBlastTable(buscoPathObj.tblastn, options.ali_length, options.rank)
-        scoreDict[ buscoDB ] = blastTable[options.rank]
+        if buscoDB:
+            blastTable = ImportBlastTable(tblastnFile, options.ali_length, options.rank)
+            scoreDict[ buscoDB ] = blastTable[options.rank]
 
-    bestBuscoResults = IdentifyTopBuscos(scoreDict, options.rank)
-    PlotMeasures(scoreDict, options.output, bestBuscoResults)
+    if len(scoreDict) > 0:
+
+        bestBuscoResults = IdentifyTopBuscos(scoreDict, options.rank)
+        PlotMeasures(scoreDict, options.output, bestBuscoResults)
+
+    else: print('There were no valid BUSCO folders provided. No results generated.')
 ###############################################################################
 
 # region Input handling
 
 def ValidateBuscoFolder(buscoPath):
 
-    ''' Not a full validation, just checking the files I need are present
-        A bit of a sloppy implementation, just a lot of exit statements when required files are absent '''
-    buscoPathObj = namedtuple('buscoPaths', ['tblastn', 'short_summary'])
-    blastFolder = os.path.join(buscoPath, 'blast_output')
-
+    ''' Not a full validation, just checking the files I need are present '''
     buscoDB = _extractDatabaseName(buscoPath)
 
-    ''' Check that the BLAST folder exists, abort if it doesn't and load in the files if it does '''
-    ValidateFolder(inFile=blastFolder, fileTypeWarning='BLAST folder', behaviour='abort')
-    tblastnFile = glob.glob(blastFolder + '/tblastn_BUSCO.*.{}.tsv'.format(buscoDB) )[0]
-    ValidateFile(inFile=tblastnFile, fileTypeWarning='tBLASTn table', behaviour='abort')   
-    buscoPathObj.tblastn = tblastnFile
+    ''' Check that the required files exist, return None if they don't, which will trigger a skip '''
+    blastFolder = os.path.join(buscoPath, 'blast_output')
+    blastFolder = ValidateFolder(inFile=blastFolder, behaviour='callback', _callback=_fileCallback, fType='BLAST folder')
 
-    ''' Check for the summary file '''
-    shortSummaryFile = glob.glob( '{}/short_summary_BUSCO.*.{}.txt'.format(buscoPath, buscoDB) )[0]
-    ValidateFile(inFile=shortSummaryFile, fileTypeWarning='tBLASTn table', behaviour='abort')   
-    buscoPathObj.short_summary = shortSummaryFile
+    tblastnFile = GetBuscoFile(blastFolder, 'tblastn_BUSCO.*.{}.tsv'.format(buscoDB))
+    tblastnFile = ValidateFile(inFile=tblastnFile, behaviour='callback', _callback=_fileCallback, fType='tBLASTn file')
 
-    return buscoDB, buscoPathObj
+    shortSummaryFile = GetBuscoFile(buscoPath, 'short_summary_BUSCO.*.{}.txt'.format(buscoDB))
+    shortSummaryFile = ValidateFile(inFile=shortSummaryFile, behaviour='callback', _callback=_fileCallback, fType='summary file')
 
-def _fileCallback(**kwargs):
+    if blastFolder and tblastnFile and shortSummaryFile:
+        return buscoDB, tblastnFile, shortSummaryFile
+    else:
+        return None, None, None
 
+def GetBuscoFile(folder, fileString):
+
+    sPath = os.path.join(folder, fileString)
+    return glob.glob(sPath)[0]
+
+def _fileCallback(kwargs):
+
+    print( 'Warning: Unable to detect {}, skipping....'.format(kwargs['fType']) )
     return None
 
 def _extractDatabaseName(buscoFolder):
