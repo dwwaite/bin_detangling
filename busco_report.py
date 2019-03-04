@@ -33,10 +33,10 @@ def main():
     for buscoFolder in buscoFolders:
 
         buscoDB, buscoPathObj = ValidateBuscoFolder( buscoFolder )
-        blastTable = ImportBlastTable(buscoPathObj.tblastn, options.ali_length, options.rank)
 
+        #if buscoPathObj:
+        blastTable = ImportBlastTable(buscoPathObj.tblastn, options.ali_length, options.rank)
         scoreDict[ buscoDB ] = blastTable[options.rank]
-        #print( '{} <==> {}'.format(buscoPathObj.tblastn, buscoPathObj.short_summary) )
 
     bestBuscoResults = IdentifyTopBuscos(scoreDict, options.rank)
     PlotMeasures(scoreDict, options.output, bestBuscoResults)
@@ -65,6 +65,10 @@ def ValidateBuscoFolder(buscoPath):
     buscoPathObj.short_summary = shortSummaryFile
 
     return buscoDB, buscoPathObj
+
+def _fileCallback(**kwargs):
+
+    return None
 
 def _extractDatabaseName(buscoFolder):
     buscoDB =  buscoFolder.split('.')[-1]
@@ -136,45 +140,30 @@ def PlotMeasures(valueDict, outputPath, topBuscos):
 
     ''' Plot and customise '''
     vPlot = plt.violinplot([ valueDict[k] for k in keySort ], showmeans=False, showmedians=True)
-
     for k, pc in zip(keySort, vPlot['bodies']):
 
         pc.set_facecolor('g')
+        pc.set_edgecolor('black')
+        pc.set_linewidth(0.5)
         
         if k in topBuscos:    
             pc.set_alpha(1.0)
         else:   
             pc.set_alpha(0.2)
 
+    for partname in ['cbars','cmins','cmaxes', 'cmedians']:
+        vPlot[partname].set_edgecolor('black')
+        vPlot[partname].set_linewidth(0.5)
+
     ''' https://matplotlib.org/1.5.0/examples/statistics/boxplot_vs_violin_demo.html '''
     ax = plt.gca()
     plt.setp(ax, yticks=[ x for x in range(0, 101, 10) ], ylabel='Identity (%)', xlabel='BUSCO collection',
              xticks=[ y+1 for y in range(len(keySort)) ], xticklabels=keySort)
+    plt.xticks(rotation=90)
 
-
-    plt.show()
     outputFile = '{}.violinplot.png'.format(outputPath)
-    #fig.savefig(outputFile, bbox_inches='tight')
+    plt.savefig(outputFile, bbox_inches='tight')
 
-# endregion
-"""
-  ''' Clear the plotting space '''
-    plt.clf()
-
-    ''' Plot the points '''
-    colValues = [ colourLookup[x] for x in pcaObj.df.Cluster ]
-    plt.scatter(pcaObj.df.PC1, pcaObj.df.PC2, c=colValues)
-
-    ''' For each cluster, add a centroid label '''
-    clusterNames = _grabClusterNames(pcaObj.df)
-    for clusterName in clusterNames:
-
-        tempdf = pcaObj.df[ pcaObj.df.Cluster == clusterName ]
-        x, y = _returnCentroid(tempdf)
-        plt.text(x, y, clusterName, fontsize=20)
-
-    _produceAndSavePlot(plt, pcaObj.pc1_label, pcaObj.pc2_label, outputName, 'cluster')
-"""
 ###############################################################################
 if __name__ == '__main__':
      main()
