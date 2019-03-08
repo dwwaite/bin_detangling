@@ -27,7 +27,7 @@ def main():
     options.output = ValidateFile(inFile=options.output, behaviour='callback', _callback=_outputCallback, fastaFile=options.fasta, outputFile=options.output)
 
     # Parse the filter_length, if it exists.
-    options.filter_length = ValidateInteger(userChoice=options.filter_length, parameterNameWarning='filter length', behaviour='default', defaultValue=1000):
+    options.filter_length = ValidateInteger(userChoice=options.filter_length, parameterNameWarning='filter length', behaviour='default', defaultValue=1000)
 
     ''' Proceed... '''
     table = ImportVizBinData(options.points, options.fasta, options.annotation, options.filter_length)
