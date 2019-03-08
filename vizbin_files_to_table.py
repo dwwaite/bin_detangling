@@ -5,7 +5,7 @@ import sys, os
 import pandas as pd
 from optparse import OptionParser
 
-from OptionValidator import ValidateFile, ValidateInteger
+from scripts.OptionValidator import ValidateFile, ValidateInteger
 
 def main():
 
@@ -24,7 +24,11 @@ def main():
     options.points = ValidateFile(inFile=options.points, behaviour='abort', fileTypeWarning='points file')
     options.fasta = ValidateFile(inFile=options.fasta, behaviour='abort', fileTypeWarning='fasta file')
     options.annotation = ValidateFile(inFile=options.annotation, behaviour='skip', fileTypeWarning='annotation file')
-    options.output = ValidateFile(inFile=options.output, behaviour='callback', _callback=_outputCallback, fastaFile=options.fasta, outputFile=options.output)
+
+    if not options.output:
+        oName = os.path.splitext(options.fasta)[0] + '.csv'
+        print('Warning: No output file name provided, using {}....'.format(oName))
+        options.output = oName
 
     # Parse the filter_length, if it exists.
     options.filter_length = ValidateInteger(userChoice=options.filter_length, parameterNameWarning='filter length', behaviour='default', defaultValue=1000)
@@ -32,18 +36,6 @@ def main():
     ''' Proceed... '''
     table = ImportVizBinData(options.points, options.fasta, options.annotation, options.filter_length)
     table.to_csv(options.output, index=False, sep='\t')
-###############################################################################
-# This a a silly over-complication of setting a default file, but I don't want defaults to be
-# a standard part of the file validation library.
-def _outputCallback(kwargs):
-
-    if os.path.isfile( kwargs['outputFile'] ):
-        return kwargs['outputFile']
-    else:
-        oName = os.path.splitext(kwargs['fastaFile'])[0] + '.csv'
-        print( 'Warning: No output file name provided, using {}....'.format(oName) )
-        return oName
-
 ###############################################################################
 
 def ImportAndFilterFasta(fastaFile, filtLength):
