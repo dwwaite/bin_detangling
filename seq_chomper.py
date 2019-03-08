@@ -14,6 +14,7 @@ def main():
     ''' Set up the options '''
     parser = OptionParser()
     parser.add_option('-c', '--contig-size', help='Size to chop contigs', dest='contigSize', default=1500)
+    parser.add_option('-o', '--output', help='Name for output files (Default: chomp_pool)', dest='output', default='chomp_pool')
 
     options, inputFiles = parser.parse_args()
 
@@ -21,8 +22,8 @@ def main():
     options.contigSize = ValidateInteger(userChoice=options.contigSize, parameterNameWarning='contig size', behaviour='default', defaultValue=1500)
 
     ''' Set output file names '''
-    fastaOutputName, fastaWriter = OpenFastaStream(inputFiles[0], options.contigSize)
-    binRecordWriter = OpenBinRecordWriter(inputFiles, fastaOutputName)
+    fastaWriter = OpenFastaStream(options.output, options.contigSize, inputFiles[0])
+    binRecordWriter = OpenBinRecordWriter(options.output, options.contigSize)
 
     for inputFile in inputFiles:
 
@@ -35,20 +36,13 @@ def main():
 
 # region File name handlers
 
-def OpenFastaStream(infileName, contigSize):
-    infBase, infExt = os.path.splitext(infileName)
-    fastaName = '{}.chomp{}{}'.format(infBase, contigSize, infExt)
+def OpenFastaStream(outputName, contigSize, infileName):
+    fastaExt = os.path.splitext(infileName)[1]
+    fastaName = '{}.chomp{}{}'.format(outputName, contigSize, infExt)
     return fastaName, open(fastaName, 'w')
 
-def OpenBinRecordWriter(inputFiles, fastaName):
-
-    if len(inputFiles) <= 1:
-        return None
-
-    else:
-
-        fExt = os.path.splitext(fastaName)[1]
-        return open(fastaName.replace(fExt, '.txt'), 'w')
+def OpenBinRecordWriter(outputName, contigSize):
+    return open( '{}.chomp{}.txt'.format(outputName, contigSize), 'w')
 
 # endregion
 
