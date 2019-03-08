@@ -38,8 +38,8 @@ def main():
 
 def OpenFastaStream(outputName, contigSize, infileName):
     fastaExt = os.path.splitext(infileName)[1]
-    fastaName = '{}.chomp{}{}'.format(outputName, contigSize, infExt)
-    return fastaName, open(fastaName, 'w')
+    fastaName = '{}.chomp{}{}'.format(outputName, contigSize, fastaExt)
+    return open(fastaName, 'w')
 
 def OpenBinRecordWriter(outputName, contigSize):
     return open( '{}.chomp{}.txt'.format(outputName, contigSize), 'w')
