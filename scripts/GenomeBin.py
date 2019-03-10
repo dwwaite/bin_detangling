@@ -50,10 +50,8 @@ class GenomeBin:
 
     def MapDisplacementBanding(self):
 
-        ''' This needs improvement - the current implementation gives a large jump from [n-1] and 1.
-            Instead start on this formula, then once we pass the curve, linear extrapolation to the end. '''
-        sliceSequence = [ 1 - ( 1 / (1 + x) ) for x in range(1, self._numSlices) ]
-        sliceSequence.append(1.0)
+        ''' Project the points along a the first quarter of a sine wave to get a smooth path from 0.0 to 1.0 '''
+        sliceSequence = np.sin( [ x / self._numSlices * np.pi/2 for x in range(1, self._numSlices+1) ] )
 
         nRows = self.binPoints.shape[0]
         sliceBand = []
@@ -206,7 +204,7 @@ class GenomeBin:
     #region Static functions
 
     @staticmethod
-    def ParseStartingVariables(ePath, nSlices, binNames):
+    def ParseStartingVariables(ePath, nSlices, binNames, outputPrefix = None):
 
         ''' Just a QoL method for pre-formating the input data for constructing GenomeBin objects.
             Allows for a nice way to terminate the script early if there are path issues, before getting to the actual grunt work '''
@@ -220,7 +218,9 @@ class GenomeBin:
         for bN in binNames:
 
             if bN in validBins:
-                b = binDataLoader(esomPath=ePath, binIdent=bN, numSlices=nSlices, outputPath=bN + '.refined')
+
+                outputPath = outputPrefix + bN + '.refined' if outputPrefix else bN + '.refined'
+                b = binDataLoader(esomPath=ePath, binIdent=bN, numSlices=nSlices, outputPath=outputPath)
                 dataStore.append(b)
 
             else:
@@ -368,9 +368,10 @@ class ContaminationRecordManager():
 
                     binInstanceDict[ contamEvent.originalBin ].DropContig(contamEvent.contigName)
 
-                ''' If the first condition was failed, remove in the reverse if the bin was specified in this iteration '''
                 elif contamEvent.contamBin in binInstanceDict:
 
+                    ''' If the first condition was failed, remove in the reverse if the bin was specified in this iteration
+                        This gives a benefit-of-the-doubt weighting to the original bin, which is intended '''
                     binInstanceDict[ contamEvent.contamBin ].DropContig(contamEvent.contigName)
 
                 ''' Remove the bin from any other carrier, as required '''

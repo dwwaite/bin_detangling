@@ -26,6 +26,7 @@ def main():
     usage = "usage: %prog [options] [starter-bin fasta files]"
 
     parser.add_option('-e', '--esom-table', help='A vizbin table produced by the vizbin_FilesToTable.py script', dest='esomTable')
+    parser.add_option('-o', '--output', help='An output prefix for all generated files (Default: None)', dest='output', default=None)
     parser.add_option('-s', '--slices', help='Number of slices of each bin to take, projected across the asymptotic function [1 - (1 / (1 + s))] Default = 50', dest='slices', default=50)
     parser.add_option('-b', '--bias-threshold', help='The weighting at which contigs are assigned to a bin when fragments appear across multiple bins (Default 0.9)', dest='biasThreshold', default=0.9)
     parser.add_option('-t', '--threads', help='Number of threads', dest='threads', default=1)
@@ -38,7 +39,7 @@ def main():
     options.biasThreshold = ValidateFloat(userChoice=options.biasThreshold, parameterNameWarning='bias threshold', behaviour='default', defaultValue=0.9)
 
     ''' Parse the values into a list of per-bin settings '''
-    binPrecursors = GenomeBin.ParseStartingVariables(options.esomTable, options.slices, binNames)
+    binPrecursors = GenomeBin.ParseStartingVariables(options.esomTable, options.slices, binNames, options.output)
 
     if not binPrecursors:
         print('Unable to locate any valid contig lists. Aborting...')
@@ -59,15 +60,12 @@ def main():
     contaminationInstanceRecord.IndexRecords()
     contaminationInstanceRecord.CalculateContigDistributions(options.esomTable)
 
-    print(len(binInstances))
-
     ''' Recasting the binInstances list as a dict, so I can access specific bins at will '''
     binInstances = { bI.binIdentifier: bI for bI in binInstances }
     revisedBinInstances = contaminationInstanceRecord.ResolveContaminationByAbundance(binInstances, options.biasThreshold)
 
     ''' For each bin, write out the core contigs that are trusted at this stage. '''
     for binInstance in revisedBinInstances.values():
-        print( binInstance.to_string() )
         GenomeBin.SaveCoreContigs(binInstance)
 
 ###############################################################################
