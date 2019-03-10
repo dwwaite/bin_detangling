@@ -93,6 +93,7 @@ class GenomeBin:
             ''' Calculate the MCC '''
             obsContigs = self._resolveObservedArray(binDfSlice.ContigName, contamContigs)
             self._mccValues[i] = matthews_corrcoef(self._expectedContigs, obsContigs)
+
             if self._mccValues[i] >= topMcc:
                 self._bestSlice = i
                 topMcc = self._mccValues[i]
@@ -112,17 +113,23 @@ class GenomeBin:
         ''' Log each contaminating contig that was found within this slice '''
         obsBins, contamContigs = contaminationMarkerStore[ self._bestSlice ]
 
+        ''' Have two data types to store in the qManager - the modified bin object, and contamination records
+            Store a tuple, with the first value as a binary switch for bin vs contam '''
+        
+
+        qManager.put( (True, self) )
+
         if contamContigs:
             for binName, contigFragment in zip(obsBins, contamContigs):
-                qManager.put( ContaminationRecord(binName, contigFragment, self.sliceSequence[ self._bestSlice ], self.binIdentifier) )
+                cRecord = ContaminationRecord(binName, contigFragment, self.sliceSequence[ self._bestSlice ], self.binIdentifier)
+                qManager.put( (False, cRecord) )
 
     def DropContig(self, contigName):
-        print( self.binPoints.shape)
         self.binPoints = self.binPoints[ self.binPoints.ContigBase != contigName ]
-        print( self.binPoints.shape)
 
     def to_string(self):
         return 'Name: {}, Contigs: {}, Best MCC: {}, '.format(self.binIdentifier, len(self.binPoints.ContigBase.unique()), self._mccValues[ self._bestSlice ])
+
     #endregion
 
     #region Internal manipulation functions
@@ -182,6 +189,11 @@ class GenomeBin:
 
     @property
     def coreContigs(self):
+
+        ''' If there is no optimal MCC, just return a fail '''
+        if self._bestSlice == -1: return None
+
+        ''' Otherwise, work out the list of contigs within the MCC-maximising zone '''
         bestSliceValue = self.sliceSequence[ self._bestSlice ]
         contigs = list (self.binPoints[ self.binPoints.SliceBand <= bestSliceValue ].ContigBase.unique() )
         if contigs:
@@ -290,9 +302,9 @@ class GenomeBin:
             contigString = '\n'.join(gBin.coreContigs) + '\n'
             outputWriter.write(contigString)
             outputWriter.close()
-        
+
         else:
-            print( '\tNo contigs remain in {}, skipping...'.format(gBin.binIdentifier) )
+            print( 'No contigs remain in {}, skipping...'.format(gBin.binIdentifier) )
 
     #endregion
 
@@ -351,16 +363,20 @@ class ContaminationRecordManager():
 
         for contamEvent in self._contigDistributionRecords:
 
-                print(contamEvent)
-                if float(contamEvent.contamAbund) / contamEvent.totalFragments > biasThreshold:
-                    print( binInstanceDict[ contamEvent.originalBin ].binIdentifier )
+                ''' First condition, does this count as a contaminant? Second condition, was the bin specified in this iteration '''
+                if float(contamEvent.contamAbund) / contamEvent.totalFragments > biasThreshold and contamEvent.originalBin in binInstanceDict:
+
                     binInstanceDict[ contamEvent.originalBin ].DropContig(contamEvent.contigName)
-                else:
-                    print( binInstanceDict[ contamEvent.contamBin ].binIdentifier )
+
+                ''' If the first condition was failed, remove in the reverse if the bin was specified in this iteration '''
+                elif contamEvent.contamBin in binInstanceDict:
+
                     binInstanceDict[ contamEvent.contamBin ].DropContig(contamEvent.contigName)
 
+                ''' Remove the bin from any other carrier, as required '''
                 for carrierBin in contamEvent.carrierBins:
-                    binInstanceDict[ carrierBin ].DropContig(contamEvent.contigName)
+    
+                    if carrierBin in binInstanceDict: binInstanceDict[ carrierBin ].DropContig(contamEvent.contigName)
 
         return binInstanceDict
 

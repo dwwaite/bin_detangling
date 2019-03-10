@@ -34,6 +34,7 @@ def main():
     ''' Validate user choices '''
     options.esomTable = ValidateFile(inFile=options.esomTable, fileTypeWarning='ESOM table', behaviour='abort')
     options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
+    options.slices = ValidateInteger(userChoice=options.slices, parameterNameWarning='slices', behaviour='default', defaultValue=50)
     options.biasThreshold = ValidateFloat(userChoice=options.biasThreshold, parameterNameWarning='bias threshold', behaviour='default', defaultValue=0.9)
 
     ''' Parse the values into a list of per-bin settings '''
@@ -43,28 +44,30 @@ def main():
         print('Unable to locate any valid contig lists. Aborting...')
         sys.exit()
 
+    ''' Instantiate the bin objects '''
     binInstances = [ GenomeBin(bP) for bP in binPrecursors ]
 
     ''' Distribute the jobs over the threads provided '''
     tManager = ThreadManager(options.threads, RefineAndPlotBin)
-    funcArgList = [ (bI, tManager.queue) for bI in binInstances ]
+    
+    funcArgList = [ (bP, tManager.queue) for bP in binInstances ]
     #tManager.ActivateMonitorPool(sleepTime=30, funcArgs=funcArgList, trackingString='Completed MCC growth for {} of {} bins.', totalJobSize=len(funcArgList))
-    tManager.ActivateMonitorPool(sleepTime=1, funcArgs=funcArgList)
+    tManager.ActivateMonitorPool(sleepTime=10, funcArgs=funcArgList)
 
     ''' Parse the results into the contamination record '''
-    contaminationInstanceRecord = PopulateContaminationRecords(tManager.results) 
-        
+    binInstances, contaminationInstanceRecord = ExtractQueuedResults(tManager.results)
     contaminationInstanceRecord.IndexRecords()
     contaminationInstanceRecord.CalculateContigDistributions(options.esomTable)
 
+    print(len(binInstances))
+
     ''' Recasting the binInstances list as a dict, so I can access specific bins at will '''
-    for bI in binInstances:
-        print( bI.to_string() )
     binInstances = { bI.binIdentifier: bI for bI in binInstances }
     revisedBinInstances = contaminationInstanceRecord.ResolveContaminationByAbundance(binInstances, options.biasThreshold)
 
     ''' For each bin, write out the core contigs that are trusted at this stage. '''
     for binInstance in revisedBinInstances.values():
+        print( binInstance.to_string() )
         GenomeBin.SaveCoreContigs(binInstance)
 
 ###############################################################################
@@ -73,11 +76,17 @@ def main():
 
 def RefineAndPlotBin(argTuple):
 
+    '''
+        2019/03/11 - As a future point, it would make sense to rewrite ComputeCloudPurity as a static function of GenomeBin,
+                     with specific functions for the steps within the MCC expansion.
+                     This change would be cosmetic only, so remains TODO.
+    '''
     binInstance, q = argTuple
 
     try:
 
         binInstance.ComputeCloudPurity(q)
+
         GenomeBin.PlotTrace(binInstance)
         GenomeBin.PlotContours(binInstance)
         #GenomeBin.SaveMccTable(binInstance)
@@ -85,14 +94,23 @@ def RefineAndPlotBin(argTuple):
     except:
         print( 'Error processing bin {}, skipping...'.format(binInstance.binIdentifier) )
 
-def PopulateContaminationRecords(resultsList):
+def ExtractQueuedResults(resultsQueue):
 
     cIR = ContaminationRecordManager()
+    updatedBinList = []
 
-    for cR in resultsList:
-        cIR.AddRecord(cR)
+    '''
+        The Queue object contains tuples of (bool, object), where the bool refers to whether the object is a GenomeBin or not.
+        This is used to determine which result container the object is stored in.
+    '''
+    for isBin, obj in resultsQueue:
 
-    return cIR
+        if isBin:
+            updatedBinList.append(obj)
+        else:
+            cIR.AddRecord(obj)
+
+    return updatedBinList, cIR
 
 #endregion
 
