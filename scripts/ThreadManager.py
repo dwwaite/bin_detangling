@@ -17,6 +17,9 @@ class ThreadManager:
         ''' An unused pointer for now, will be used to catch the map_async call when it happens '''
         self._tracker = None
 
+        ''' An unused pointer for now, will be populated on the first call to the results property '''
+        self._results = None
+
     def ActivateMonitorPool(self, sleepTime, funcArgs, trackingString = None, totalJobSize = None):
 
         '''
@@ -46,7 +49,11 @@ class ThreadManager:
 
     @property
     def results(self):
-        return [ x for x in self._extractQueueResults() ]
+
+        if not self._results:
+            self._results = [ x for x in self._extractQueueResults() ]
+
+        return self._results
 
     def _extractQueueResults(self):
         while not self.queue.empty():
