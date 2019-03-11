@@ -54,9 +54,9 @@ def ValidateFolder(inFile, behaviour, fileTypeWarning=None, _callback=None, **kw
 
 def ValidateStringParameter(userChoice, choiceTypeWarning, allowedOptions, behaviour, defBehaviour=None):
 
-    if userChoice.lower() in set(allowedOptions):
+    if userChoice in set(allowedOptions):
 
-        return userChoice.lower()
+        return userChoice
 
     else:
 
