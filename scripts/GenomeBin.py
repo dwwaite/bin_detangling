@@ -37,12 +37,16 @@ class GenomeBin:
         ''' Set a variable of the expected contig membership for MCC calculation '''
         self._expectedContigs = [ 1 if x == self.binIdentifier else 0 for x in self._eTable.BinID ]
 
-        ''' Organise the binPoints according to distance from centroid
-            For each contig, map the displacement band from the centroid that it falls into '''
+        ''' Organise the binPoints according to distance from centroid '''
         self.ComputeDistances()
+
+        ''' Project the points along a the first quarter of a sine wave to get a smooth path from 0.0 to 1.0.
+            For each contig, map the displacement band from the centroid that it falls into '''
+        self.sliceSequence = np.sin( [ x / self._numSlices * np.pi/2 for x in range(1, self._numSlices+1) ] )
         self.MapDisplacementBanding()
 
     #region Externally exposed functions
+
     def ComputeDistances(self):
         cenX, cenY = self.centroid
         self.binPoints['Distance'] = [ self.CalcDist(cenX, cenY, x, y) for x, y in zip(self.binPoints.V1, self.binPoints.V2)  ]
@@ -50,13 +54,10 @@ class GenomeBin:
 
     def MapDisplacementBanding(self):
 
-        ''' Project the points along a the first quarter of a sine wave to get a smooth path from 0.0 to 1.0 '''
-        sliceSequence = np.sin( [ x / self._numSlices * np.pi/2 for x in range(1, self._numSlices+1) ] )
-
         nRows = self.binPoints.shape[0]
         sliceBand = []
         prevRows = 0
-        for sliceSize in sliceSequence:
+        for sliceSize in self.sliceSequence:
             newRows = int(sliceSize * nRows) - prevRows
             prevRows = int(sliceSize * nRows)
             sliceBand.extend( [sliceSize] * newRows  )
@@ -92,15 +93,15 @@ class GenomeBin:
             obsContigs = self._resolveObservedArray(binDfSlice.ContigName, contamContigs)
             self._mccValues[i] = matthews_corrcoef(self._expectedContigs, obsContigs)
 
-            if self._mccValues[i] >= topMcc:
-                self._bestSlice = i
-                topMcc = self._mccValues[i]
-
             ''' Record the perimeter and area of the point slice. Note that these are special cases of
                 the QHull object for a 2D shape. If we project to more dimensions, this will no longer be valid '''
             self._qHulls[i] = ConvexHull(self._sliceArray[i])
             self._simplexArea[i] = self._qHulls[i].volume
             self._simplexPerimeter[i] = self._qHulls[i].area
+
+            if self._mccValues[i] >= topMcc:
+                self._bestSlice = i
+                topMcc = self._mccValues[i]
 
         ''' Log the contaminating contig points at the final extension for plotting purposes '''
         if contamContigs:
@@ -114,7 +115,6 @@ class GenomeBin:
         ''' Have two data types to store in the qManager - the modified bin object, and contamination records
             Store a tuple, with the first value as a binary switch for bin vs contam '''
         
-
         qManager.put( (True, self) )
 
         if contamContigs:
@@ -131,6 +131,7 @@ class GenomeBin:
     #endregion
 
     #region Internal manipulation functions
+
     def _resolveObservedArray(self, targetSlice, nontargetSlice):
 
         binnedContigs = set(targetSlice)
@@ -154,6 +155,7 @@ class GenomeBin:
     #endregion
 
     #region Properties
+
     @property
     def centroid(self):
         x = np.median(self.binPoints.V1)
@@ -172,6 +174,18 @@ class GenomeBin:
         return [ m for m in self._mccValues if m ]
 
     @property
+    def polsbyPopperScores(self):
+
+        '''
+            This is a metric that was originally described by Cox (1927; Journal of Paleontology 1(3): 179-183),
+            but has more recently been re-discovered in poltical science by Polsbsy an Popper.
+            
+            It is simply a measure of difference between a shape and a circle of similar size, giving a measure
+            on how compact the shape is (0 = no compactness, 1 = ideal).
+        '''
+        return [ 4 * np.pi * area / perimeter ** 2 for perimeter, area in zip(self.simplexPerimeter, self.simplexArea) ]
+
+    @property
     def simplexPerimeter(self):
         ''' Returns as masked version of _simplexPerimeter, ommiting values without a corresponding MCC '''
         return [ s for (m, s) in zip(self._mccValues, self._simplexPerimeter) if m ]
@@ -180,10 +194,6 @@ class GenomeBin:
     def simplexArea(self):
         ''' Returns as masked version of _simplexArea, ommiting values without a corresponding MCC '''
         return [ a for (m, a) in zip(self._mccValues, self._simplexArea) if m ]
-
-    @property
-    def sliceSequence(self):
-        return self.binPoints.SliceBand.unique()
 
     @property
     def coreContigs(self):
@@ -240,21 +250,17 @@ class GenomeBin:
         plt.clf()
         fig, ax = plt.subplots()
 
-        ax2 = ax.twinx()
-        xVals = gBin.sliceSequence
-        xMask = [ x for x in range(1, len(xVals)+1) ]
-
-        ax.plot(xMask, gBin.mccValues, color='g')
-        ax2.plot(xMask, [ x / y**2 for (x, y) in zip(gBin.simplexPerimeter, gBin.simplexArea) ], color='r')
-
+        #ax2 = ax.twinx()
+        ax.plot(gBin.sliceSequence, gBin.mccValues, color='g', label='MCC')
         ax.set_xlabel('Contigs binned from centroid')
         ax.set_ylabel('MCC')
-        ax2.set_ylabel('Contig density')
 
-        ''' Overwrite the xMask with the actual values '''
-        fig.canvas.draw()
-        ax.set_xticklabels( [ '{}%'.format( round(x * 100, 1) ) for x in xVals ] )
+        ax2 = ax.twinx()
+        ax2.plot(gBin.sliceSequence, gBin.polsbyPopperScores, color='r', label='PP value')
+        ax2.set_ylabel('Polsby-Popper value')
 
+        fig.ylim=(0, 1.1)
+        fig.legend(loc='upper right')
         plt.savefig('{}.trace.png'.format(gBin._outputPath), bbox_inches='tight')
 
     @staticmethod
