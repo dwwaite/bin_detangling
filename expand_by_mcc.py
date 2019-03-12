@@ -25,7 +25,7 @@ def main():
     parser = OptionParser()
     usage = "usage: %prog [options] [starter-bin fasta files]"
 
-    parser.add_option('-e', '--esom-table', help='A vizbin table produced by the vizbin_FilesToTable.py script', dest='esomTable')
+    parser.add_option('-e', '--esom-table', help='A table produced by the vizbin_files_to_table.py script', dest='esomTable')
     parser.add_option('-o', '--output', help='An output prefix for all generated files (Default: None)', dest='output', default=None)
     parser.add_option('-s', '--slices', help='Number of slices of each bin to take, projected across the asymptotic function [1 - (1 / (1 + s))] Default = 50', dest='slices', default=50)
     parser.add_option('-b', '--bias-threshold', help='The weighting at which contigs are assigned to a bin when fragments appear across multiple bins (Default 0.9)', dest='biasThreshold', default=0.9)
