@@ -7,9 +7,6 @@ from scipy.spatial import Delaunay, ConvexHull
 from collections import namedtuple
 from sklearn.metrics import matthews_corrcoef
 
-# Currently dev/debugging imports
-#from sklearn.neighbors import KernelDensity
-
 class GenomeBin:
 
     def __init__(self, binInstanceTuple):
