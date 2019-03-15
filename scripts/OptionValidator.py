@@ -50,6 +50,19 @@ def ValidateFolder(inFile, behaviour, fileTypeWarning=None, _callback=None, **kw
             print( 'Warning: Unable to detect {} {}, aborting....'.format(fileTypeWarning, inFile) )
             sys.exit()
 
+def ValidateDataFrameColumns(df, columnsRequired):
+
+    try:
+
+        for reqColumn in columnsRequired:
+
+            assert( reqColumn in df.columns), reqColumn
+
+    except AssertionError as ae:
+
+        print( '\nUnable to find required column {}, aborting...'.format(ae) )
+        sys.exit()
+
 # endregion 
 
 def ValidateStringParameter(userChoice, choiceTypeWarning, allowedOptions, behaviour, defBehaviour=None):
