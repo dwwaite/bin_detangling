@@ -96,7 +96,7 @@ def CreateKmerRecord(orderedArgs):
         q.put( kmerMap )
 
     except:
-        print( '\tError parsing conig \'{}\', skipping...'.format(contig) )
+        print( '\tError parsing contig \'{}\', skipping...'.format(contig) )
 
 def ReverseComplement(naiveTable):
 
