@@ -34,8 +34,8 @@ from scripts.MachineModelController import MachineController
 def main():
 
     # Parse options
-    parser = OptionParser()
-    usage = "usage: %prog [options] [contig list files]"
+    usageString = "usage: %prog [options] [contig list files]"
+    parser = OptionParser(usage=usageString)
 
     # Basic options
     parser.add_option('-e', '--esom-table', help='A table produced by the vizbin_files_to_table.py script', dest='esomTable')
@@ -121,17 +121,19 @@ def main():
         if options.evaluate_only: sys.exit()
 
     ''' Step 4. '''
-
-    #if not options.reload:
-
     # Internal validation of the confidence ranges seen for true and false positive results
-    confidenceFrame, confidenceContigs, confidenceBinMembership = ParseEsomForErrorProfiling(options.esomTable, options.coverageTable, options.use_bin_membership, coreContigLists, featureList)
-    confidenceResult = machineModelController.ClassifyByEnsemble(confidenceFrame, confidenceContigs)
+    # This is a wish-list feature. Requires heavy background reading of the best way to create critical values from confidence distributions
+    '''
+    if not options.reload:
+        confidenceFrame, confidenceContigs, confidenceBinMembership = ParseEsomForErrorProfiling(options.esomTable, options.coverageTable, options.use_bin_membership, coreContigLists, featureList)
+        confidenceResult = machineModelController.ClassifyByEnsemble(confidenceFrame, confidenceContigs)
 
-    confidenceResult = AttachBinMembership(confidenceResult, confidenceContigs, confidenceBinMembership)
-    confidenceDistributions = ComputeConfidenceProfiles(confidenceResult, outputFileStub)
-    
-    #errorModel = machineModelController.ClassifyByEnsemble()
+        confidenceResult = AttachBinMembership(confidenceResult, confidenceContigs, confidenceBinMembership)
+        confidenceDistributions = ComputeConfidenceProfiles(confidenceResult, outputFileStub)
+        
+        errorModel = machineModelController.ClassifyByEnsemble()
+    '''
+
     result = machineModelController.ClassifyByEnsemble(classificationData, classificationContigs)
     result.to_csv('debug.txt', index=False, sep='\t')
 
