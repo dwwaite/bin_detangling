@@ -56,7 +56,7 @@ def ValidateDataFrameColumns(df, columnsRequired):
 
         for reqColumn in columnsRequired:
 
-            assert( reqColumn in df.columns), reqColumn
+            assert( reqColumn in df.columns ), reqColumn
 
     except AssertionError as ae:
 

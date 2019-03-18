@@ -18,7 +18,7 @@
 
 '''
 
-import sys, os
+import sys, os, re
 import pandas as pd
 import numpy as np
 from optparse import OptionParser
@@ -58,7 +58,14 @@ def main():
     options, coreContigLists = parser.parse_args()
 
     '''
-        Validate the first set of user choices
+        Pre-workflow overhead: Validation of user choices.
+
+        This occurs in two stages;
+            1. Import and validation of ESOM table and coverage table
+            2. Validation of remaining parameters
+
+        This order was chosen because in the event of a default neural network being requested, the layer sizes is calculated from the ESOM table structure
+
     '''
     options.esomTable = ValidateFile(inFile=options.esomTable, fileTypeWarning='ESOM table', behaviour='abort')
     if options.coverageTable:
@@ -67,16 +74,17 @@ def main():
     outputFileStub = options.output if options.output else os.path.splitext(options.esomTable)[0]
 
     '''
-        User data is imported now, because it is required for setting default neural-network parameters.
-        Table is split into the following variables:
-
-        1. ESOM table - consists of columns used in modelling. ESOM coordinates as V*, Coverage values as Coverage*, Bin membership as bin names
-        1. Contig list - 
-        1. Feature list - 
+        Original ESOM table is split into the following variables:
+            1. ESOM table - A DataFrame for modelling. ESOM coordinates as V*, Coverage values as Coverage*, Bin membership as bin names
+            2. Feature list - The column names in the ESOM table that are used for modelling.
+            3. Contig list - A list of the contig fragment names, in the order they occur in the ESOM table
+            4. Bin membership list - A list of the bins that each contig is found in. Order matches that of outputs 1 and 2.
     '''
-    esomTable, contigList, binMembershipList = ParseEsomForTraining(options.esomTable, options.coverageTable, options.use_bin_membership, coreContigLists)
-    featureList = esomTable.columns
+    userTable = pd.read_csv(options.esomTable, sep='\t')
+    ValidateDataFrameColumns(df=userTable, columnsRequired=['BinID', 'ContigName', 'ContigBase'])
 
+    esomTable, featureList, contigList, binMembershipList = ParseEsomForTraining(userTable, options.coverageTable, options.use_bin_membership, coreContigLists)
+    
     options.models = ExtractAndVerifyModelChoices(options.models)
     options.seed = ValidateInteger(userChoice=options.seed, parameterNameWarning='random seed', behaviour='skip')
     options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
@@ -122,20 +130,23 @@ def main():
 
     ''' Step 4. '''
     # Internal validation of the confidence ranges seen for true and false positive results
-    # This is a wish-list feature. Requires heavy background reading of the best way to create critical values from confidence distributions
+    # Options:
+    #   Confidence intervals - won't work, training data is too specific
+    #   Odds ratio - 
+    #if not options.reload:
+    confidenceFrame, confidenceContigs, confidenceBinMembership = ParseEsomForErrorProfiling(options.esomTable, options.coverageTable, options.use_bin_membership, coreContigLists, featureList)
+    confidenceResult = machineModelController.ClassifyByEnsemble(confidenceFrame, confidenceContigs)
+    confidenceResult = AttachBinMembership(confidenceResult, confidenceContigs, confidenceBinMembership)
+    confidenceResult.to_csv('conf.txt', index=False, sep='\t')
     '''
-    if not options.reload:
-        confidenceFrame, confidenceContigs, confidenceBinMembership = ParseEsomForErrorProfiling(options.esomTable, options.coverageTable, options.use_bin_membership, coreContigLists, featureList)
-        confidenceResult = machineModelController.ClassifyByEnsemble(confidenceFrame, confidenceContigs)
-
-        confidenceResult = AttachBinMembership(confidenceResult, confidenceContigs, confidenceBinMembership)
+        
         confidenceDistributions = ComputeConfidenceProfiles(confidenceResult, outputFileStub)
         
         errorModel = machineModelController.ClassifyByEnsemble()
     '''
 
-    result = machineModelController.ClassifyByEnsemble(classificationData, classificationContigs)
-    result.to_csv('debug.txt', index=False, sep='\t')
+    #ensembleResult = machineModelController.ClassifyByEnsemble(classificationData, classificationContigs)
+    #ensembleResult.to_csv('debug.txt', index=False, sep='\t')
 
 ###############################################################################
 
@@ -158,7 +169,7 @@ def ExtractAndVerifyModelChoices(modelString):
             modelChoices[i] = ValidateStringParameter(userChoice=mC, choiceTypeWarning='model choice', allowedOptions=supportedOpts, behaviour='skip')
 
     else:
-        print(modelString)
+
         modelChoices = [ ValidateStringParameter(userChoice=modelString, choiceTypeWarning='model choice', allowedOptions=supportedOpts, behaviour='skip') ]
 
     modelChoices = [ mC for mC in modelChoices if mC ]
@@ -204,7 +215,7 @@ def ExtractAndVerifyLayerChoices(neuronString, featureList, coreContigList):
 
 # region User data import
 
-def ParseEsomForTraining(esomTablePath, coverageTablePath, binMembershipFlag, coreContigLists):
+def ParseEsomForTraining(esomTable, coverageTablePath, binMembershipFlag, coreContigLists):
 
     '''
         Begin by reading in the esomTable that was used in the expand_by_mcc.py script. For each contig, take the average (median) V1 and V2 positions,
@@ -222,16 +233,18 @@ def ParseEsomForTraining(esomTablePath, coverageTablePath, binMembershipFlag, co
         3. Bin* - Normalised coordinates from ESOM
     '''
 
-    ''' Read the minimum amount of data required to create the training frame '''
-    esomTable = pd.read_csv(esomTablePath, sep='\t')
+    featureList = _identifyFeatureColumns( esomTable.columns )
 
-    '''
-        TODO: Allow arbitrary number of V* columns
-    '''
-    preTrainingList = [ {'V1': np.median(df.V1), 'V2': np.median(df.V2), 'Contig': c, 'OriginalBin': list(df.BinID)[0]} for c, df in esomTable.groupby('ContigBase') ]
+    preTrainingList = []
+    for c, df in esomTable.groupby('ContigBase'):
+
+        dataRecord = { v: np.median(df[v]) for v in featureList }
+        dataRecord['Contig'] = c
+        dataRecord['OriginalBin'] = list(df.BinID)[0]
+
+        preTrainingList.append( dataRecord )
+
     preTrainingFrame = pd.DataFrame(preTrainingList)
-
-    featureList = ['V1', 'V2']
 
     ''' If required, append coverage information and normalise it '''
     if coverageTablePath:
@@ -255,7 +268,7 @@ def ParseEsomForTraining(esomTablePath, coverageTablePath, binMembershipFlag, co
     ''' Pop off the Contigs column '''
     contigList = list( preTrainingFrame.pop('Contig') )
 
-    return preTrainingFrame, contigList, trainingBinList
+    return preTrainingFrame, featureList, contigList, trainingBinList
 
 def ParseEsomForErrorProfiling(esomTablePath, coverageTablePath, binMembershipFlag, coreContigLists, featureList):
 
@@ -284,6 +297,10 @@ def ParseEsomForErrorProfiling(esomTablePath, coverageTablePath, binMembershipFl
     contigNames = list( esomTable['Contig'] )
 
     return esomTable.loc[:,featureList], contigNames, binMembership
+
+def _identifyFeatureColumns(columnValues):
+    ''' Simple regex for a V with any number of digits trailing. It is highly unlikely we will ever use more than half a dozen '''
+    return [ x for x in columnValues if re.match( r'V\d+$', x) ]
 
 def _appendCoverageTable(baseFrame, coverageTablePath, contigColumnName):
 
