@@ -160,6 +160,12 @@ def _reduceMatrixSpace(cMatrix, heightMatrix):
     uniquePairDf = pd.DataFrame(uniquePairs)
     uniquePairDf = uniquePairDf[['X', 'Y', 'H']]
 
+    ''' Normalise each column to give equal weight to the dimensions.
+        Given the wrap-around nature of the X and Y coordinates, typical transformations won't work so relative proportions is the best I can do. '''
+    uniquePairDf.X = uniquePairDf.X / np.max( uniquePairDf.X )
+    uniquePairDf.Y = uniquePairDf.Y / np.max( uniquePairDf.Y )
+    uniquePairDf.H = uniquePairDf.H / np.max( uniquePairDf.H )
+
     return uniquePairDf.values, uniquePairsOrder, pairMap
 
 def _pointToDist(pMatrix):
@@ -177,10 +183,9 @@ def _pointToDist(pMatrix):
 
     for i, j in combinations(range(nPoints), 2):
 
-        ''' At this stage I need to scale the X and Y distances by their max total, otherwise I get 2 int deltas weighted against the height.
-            Since height it already scaled, the difference in height between two nodes is a simple absolute difference '''
-        dX = _calcDist(maxX, pMatrix[i,0], pMatrix[j,0]) / maxX
-        dY = _calcDist(maxY, pMatrix[i,1], pMatrix[j,1]) / maxY
+        ''' Data is already normalised, so just take the absolute differences '''
+        dX = _calcDist(maxX, pMatrix[i,0], pMatrix[j,0])
+        dY = _calcDist(maxY, pMatrix[i,1], pMatrix[j,1])
         dH = np.abs( pMatrix[i,2] - pMatrix[j,2] )
 
         d = np.sqrt( dX ** 2 + dY ** 2 + dH ** 2)
@@ -214,10 +219,9 @@ def OptmiseMDS(distArray, maxStress, maxComponents, nThreads):
     stressValues.append(distTransformed.stress_)
     dimensionValues.append(currentComponents)
 
-    currentIterations = 0
+    currentComponents += 1
     while distTransformed.stress_ > maxStress and currentComponents <= maxComponents:
 
-        currentComponents += 1
         distTransformed = MDS(n_components=currentComponents, metric=False, dissimilarity='precomputed', n_jobs=nThreads).fit(distArray)
 
         stressValues.append(distTransformed.stress_)
@@ -225,6 +229,8 @@ def OptmiseMDS(distArray, maxStress, maxComponents, nThreads):
 
         if distTransformed.stress_ <= maxStress:
             return distTransformed.embedding_, currentComponents, distTransformed.stress_
+
+        currentComponents += 1
 
     print( 'Unable to achieve desired stress of {} in less than {} dimensions. Aborting...'.format(maxStress, maxComponents) )
 
