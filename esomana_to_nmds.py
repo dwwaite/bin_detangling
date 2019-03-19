@@ -2,7 +2,7 @@
     ESOMana is a powerful way to detangle metagenomic bins, but comes with the following headache:
 
     * What I want = A finite, low-dimensional representation of the distance between contig points, from which ML models can be trained
-    * What I get = An infinite, low-dimensions representation of the distance between contig points, as the ESOM repeats over the edges of the
+    * What I get = An infinite, low-dimensional representation of the distance between contig points, as the ESOM repeats over the edges of the
         plotting space.
 
         E.g. For a plot with 10 x 10 neurons, the neuron at [9,1] is 1 x-value away from [8,1] and [10,1], but then 2 x-values away from [7,1] and [1,1].
@@ -38,8 +38,8 @@ def main():
 
     parser.add_option('-u', '--umx', help='An ESOMana umx file of the neuron heights', dest='umx', default='')
     parser.add_option('-n', '--names', help='An ESOMana names file to map contig names to coordinates', dest='names', default=None)
-    parser.add_option('-d', '--dimensions', help='Maximum number of dimensions for nMDS', dest='dimensions', default=30)
-    parser.add_option('-s', '--stress', help='Maximum allowed stress for nMDS fit', dest='stress', default=0.2)
+    parser.add_option('-d', '--dimensions', help='Maximum number of dimensions for nMDS (Default: 5)', dest='dimensions', default=5)
+    parser.add_option('-s', '--stress', help='Maximum allowed stress for nMDS fit (Default: None)', dest='stress', default=None)
     parser.add_option('-t', '--threads', help='Number of threads for nMDS calculation', dest='threads', default=1)
     parser.add_option('--add-contig-base', help='TODO', dest='add_base', action='store_true', default=False)
 
@@ -57,7 +57,7 @@ def main():
     ValidateFile(inFile=bmFile, behaviour='abort', fileTypeWarning='bm file')
 
     options.dimensions = ValidateInteger(userChoice=options.dimensions, parameterNameWarning='dimensions', behaviour='default', defaultValue=30)
-    options.stress = ValidateFloat(userChoice=options.stress, parameterNameWarning='stress', behaviour='default', defaultValue=0.2)
+    options.stress = ValidateFloat(userChoice=options.stress, parameterNameWarning='stress', behaviour='skip')
     options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
 
     '''
@@ -213,31 +213,36 @@ def OptmiseMDS(distArray, maxStress, maxComponents, nThreads):
     currentComponents = 2
     distTransformed = MDS(n_components=currentComponents, metric=False, dissimilarity='precomputed', n_jobs=nThreads).fit(distArray)
 
-    if distTransformed.stress_ <= maxStress:
+    if maxStress and distTransformed.stress_ <= maxStress:
         return distTransformed.embedding_, currentComponents, distTransformed.stress_
 
     stressValues.append(distTransformed.stress_)
     dimensionValues.append(currentComponents)
 
-    currentComponents += 1
-    while distTransformed.stress_ > maxStress and currentComponents <= maxComponents:
+    while currentComponents <= maxComponents - 1:
+
+        currentComponents += 1
 
         distTransformed = MDS(n_components=currentComponents, metric=False, dissimilarity='precomputed', n_jobs=nThreads).fit(distArray)
 
         stressValues.append(distTransformed.stress_)
         dimensionValues.append(currentComponents)
 
-        if distTransformed.stress_ <= maxStress:
-            return distTransformed.embedding_, currentComponents, distTransformed.stress_
+        if maxStress:
+            if distTransformed.stress_ <= maxStress: return distTransformed.embedding_, currentComponents, distTransformed.stress_
 
-        currentComponents += 1
+    ''' If a maximum stress value was specified and the nMDS cannot reach it, report the results and abort. '''
+    if maxStress:
+        print( 'Unable to achieve desired stress of {} in less than {} dimensions. Aborting...'.format(maxStress, maxComponents) )
 
-    print( 'Unable to achieve desired stress of {} in less than {} dimensions. Aborting...'.format(maxStress, maxComponents) )
+        for d, s in zip(dimensionValues, stressValues):
+            print( '  Dimensions: {}, Stress: {} '.format(d, s) )
 
-    for d, s in zip(dimensionValues, stressValues):
-        print( '  Dimensions: {}, Stress: {} '.format(d, s) )
+        sys.exit()
 
-    sys.exit()
+    ''' Otherwise, just return the max-dimension result '''
+    return distTransformed.embedding_, currentComponents, distTransformed.stress_
+
 
 def PopulateOrdinationTable(coordinateValues, coordinateSequence, coordinateMap):
 
