@@ -141,7 +141,7 @@ def EsomToPlot(eTable, contigVector, clusterVector):
 
     ''' Slice the eTable down to just the first two dimensions. Warn the user if this reduces the dimensions '''
     dESOM = namedtuple('plotObj', ['df', 'x', 'y'])
-    dESOM.df = pd.DataFrame(eTable.iloc[:,0:2], columns=['X', 'Y'])
+    dESOM.df = pd.DataFrame(eTable[:,0:2], columns=['X', 'Y'])
 
     if eTable.shape[1] > dESOM.df.shape[1]: print( 'Warning: Computed ESOM comprised {} dimensions, but only the first 2 are plotted.'.format(eTable.shape[1]) )
 
