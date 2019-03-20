@@ -13,7 +13,9 @@ from scripts.SequenceManipulation import IndexFastaFile
 def main():
 
     ''' Set up the options '''
-    parser = OptionParser()
+    usageString = "usage: %prog [options] [contig files]"
+    parser = OptionParser(usage=usageString)
+
     parser.add_option('-k', '--kmer', help='Kmer size for profiling (Default: 4)', dest='kmer', default=4)
     parser.add_option('-t', '--threads', help='Number of threads to use (Default: 1)', dest='threads', default=1)
     parser.add_option('-n', '--normalise', help='Method for normalising per-column values (Options: unit variance (\'unit\'), Yeo-Johnson (\'yeojohnson\'), None (\'none\'). Default: Unit variance)', dest='normalise', default='unit')
@@ -168,9 +170,6 @@ def NormaliseColumnValues(df, normFactor):
         normDf = pd.DataFrame(normArray, columns=colsToTransform)
         normDf.insert(loc=0, column='Contig', value=contigNames)
         return normDf
-    else:
-        ''' Otherwise, none must have been chosen, return the frame unchanged. '''
-        return df
 
 def AppendCoverageTable(df, covFile):
 
