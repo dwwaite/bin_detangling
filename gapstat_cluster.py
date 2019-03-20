@@ -10,7 +10,7 @@
 
     Debug line:
     python gapstat_cluster.py -t 2 --min 2 --max 10 -o mock_cluster.pca --convex --plot tests/kmer.input.chomp1500.tsv
-    python gapstat_cluster.py -t 2 --min 2 --max 10 -o mock_cluster.tsne --ordinate-esom --convex --plot tests/kmer.input.chomp1500.tsv
+    python gapstat_cluster.py -t 2 --min 2 --max 10 -o mock_cluster.tsne --esom-ordinate --convex --plot tests/kmer.input.chomp1500.tsv
 '''
 # Basic imports
 import sys, os
@@ -44,7 +44,8 @@ def main():
     parser.add_option('--force-cluster', help='Skip gap-stat evaluation and cluster into N clusters', dest='force_cluster', default=None)
     parser.add_option('--sep', help='Separator value to delimit columns (Default = [tab])', dest='sep', default='\t')
     parser.add_option('-o', '--output', help='Name stub for all output files (Default: Inherited from input table)', dest='output_file')
-    parser.add_option('--ordinate-esom', help='Use the tSNE algorithm to create ordination and reduce dimensionality of data (Default: None, PCA for plotting)', dest='ordinate_esom', action='store_true')
+    parser.add_option('--esom-ordinate', help='Use the tSNE algorithm to create ordination and reduce dimensionality of data (Default: None, PCA for plotting)', dest='esom_ordinate', action='store_true')
+    parser.add_option('--esom-dimensions', help='Number of dimensions to project the tSNE ordination. If greater than 2 is specified and plotting requested, only the first 2 axes will be plotted (Default: 2).', dest='esom_dimensions', default=2)
     parser.add_option('--log-contigs', help='Create per-cluster files containing contig names (Default: False)', dest='log_contigs', action='store_true')
     parser.add_option('-p', '--plot', help='Plot the decision process (Default: False, but highly recommended)', dest='plot', action='store_true')
     parser.add_option('--convex', help='Plot convex hulls of the bin outlines. Useful for deciding whether or not to merge bins (Default: False)', dest='convex', action='store_true')
@@ -67,9 +68,10 @@ def main():
 
     contigNames = featureTable.pop('Contig')
 
-    if options.ordinate_esom:
-        featureTable = ReduceViaEsom(featureTable)
-
+    if options.esom_ordinate:
+        options.esom_dimensions = ValidateInteger(options.esom_dimensions, 'number of ESOM dimensions', behaviour='default', defaultValue=2)
+        featureTable = ReduceViaEsom(featureTable, options.esom_dimensions)
+        
     else:
         featureTable = featureTable.values
         
@@ -81,7 +83,7 @@ def main():
         LogGapStatistics(cEngine, options.output_file)
 
     ''' If requested, plot ordination of points with cluster information '''
-    plotObj = EsomToPlot(featureTable, contigNames, clusterIdentities) if options.ordinate_esom else ReduceToPCA(featureTable, contigNames, clusterIdentities)
+    plotObj = EsomToPlot(featureTable, contigNames, clusterIdentities) if options.esom_ordinate else ReduceToPCA(featureTable, contigNames, clusterIdentities)
     colourLookup = MapColourSpace(clusterIdentities)
 
     ''' Plot the outputs, if desired.
@@ -100,11 +102,11 @@ def main():
 
 # region Clustering functions
 
-def ReduceViaEsom(df):
+def ReduceViaEsom(df, nDimensions):
 
     ''' Use a 50-dimension PCA as the starting place for tSNE clustering '''
     pcaOrd = PCA(n_components=50).fit_transform(df.values)
-    tsneOd = TSNE(n_components=2, method='barnes_hut').fit_transform(pcaOrd)
+    tsneOd = TSNE(n_components=nDimensions, method='barnes_hut').fit_transform(pcaOrd)
     return tsneOd
 
 def OptmiseClustering(featureTable, nThreads, minSize, maxSize, forceOpt):
@@ -137,8 +139,11 @@ def MapColourSpace(clusterColumn):
 
 def EsomToPlot(eTable, contigVector, clusterVector):
 
+    ''' Slice the eTable down to just the first two dimensions. Warn the user if this reduces the dimensions '''
     dESOM = namedtuple('plotObj', ['df', 'x', 'y'])
-    dESOM.df = pd.DataFrame(eTable, columns=['X', 'Y'])
+    dESOM.df = pd.DataFrame(eTable.iloc[:,0:2], columns=['X', 'Y'])
+
+    if eTable.shape[1] > dESOM.df.shape[1]: print( 'Warning: Computed ESOM comprised {} dimensions, but only the first 2 are plotted.'.format(eTable.shape[1]) )
 
     dESOM.x = 'Axis 1'; dESOM.y = 'Axis 2'
 
