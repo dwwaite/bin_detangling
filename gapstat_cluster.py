@@ -72,9 +72,6 @@ def main():
         options.esom_dimensions = ValidateInteger(options.esom_dimensions, 'number of ESOM dimensions', behaviour='default', defaultValue=2)
         featureTable = ReduceViaEsom(featureTable, options.esom_dimensions)
         
-    else:
-        featureTable = featureTable.values
-        
     cEngine, n_clusters = OptmiseClustering(featureTable, options.threads, options.min, options.max, options.force_cluster)
     clusterIdentities = ApplyClustering(featureTable, n_clusters)
 
@@ -88,7 +85,6 @@ def main():
 
     ''' Plot the outputs, if desired.
         Not the most simple method in terms of number of statements evaluated, but makes the logic simple to observe '''
-
 
     if options.plot: PlotClusters(plotObj, colourLookup, options.output_file)
     if options.plot and options.convex: PlotConvexHulls(plotObj, colourLookup, options.output_file)
@@ -107,7 +103,9 @@ def ReduceViaEsom(df, nDimensions):
     ''' Use a 50-dimension PCA as the starting place for tSNE clustering '''
     pcaOrd = PCA(n_components=50).fit_transform(df.values)
     tsneOd = TSNE(n_components=nDimensions, method='barnes_hut').fit_transform(pcaOrd)
-    return tsneOd
+
+    tsneFrame = pd.DataFrame(tsneOd, columns=[ 'V{}'.format(i+1) for i in range(nDimensions) ] )
+    return tsneFrame
 
 def OptmiseClustering(featureTable, nThreads, minSize, maxSize, forceOpt):
 
@@ -117,7 +115,7 @@ def OptmiseClustering(featureTable, nThreads, minSize, maxSize, forceOpt):
     clustEngine = OptimalK(parallel_backend='multiprocessing', n_jobs=nThreads) if nThreads > 1 else OptimalK(parallel_backend='None')
 
     ''' Where multiple best-case instances are reported, the default behaviour is to return the higher number of clusters '''
-    nClusters = clustEngine(featureTable, cluster_array=np.arange(minSize, maxSize))
+    nClusters = clustEngine(featureTable.values, cluster_array=np.arange(minSize, maxSize))
     return clustEngine, nClusters
 
 def ApplyClustering(featureTable, n_clusters):
@@ -141,7 +139,7 @@ def EsomToPlot(eTable, contigVector, clusterVector):
 
     ''' Slice the eTable down to just the first two dimensions. Warn the user if this reduces the dimensions '''
     dESOM = namedtuple('plotObj', ['df', 'x', 'y'])
-    dESOM.df = pd.DataFrame(eTable[:,0:2], columns=['X', 'Y'])
+    dESOM.df = pd.DataFrame(eTable)
 
     if eTable.shape[1] > dESOM.df.shape[1]: print( 'Warning: Computed ESOM comprised {} dimensions, but only the first 2 are plotted.'.format(eTable.shape[1]) )
 
@@ -156,11 +154,11 @@ def ReduceToPCA(mTable, contigVector, clusterVector):
 
     ''' Fit a 2D PCA '''
     pcaObj = PCA(n_components=2)
-    pcCoordinates = pcaObj.fit_transform(mTable)
+    pcCoordinates = pcaObj.fit_transform(mTable.values)
 
     ''' Package the results into a namedtuple '''
     dPCA = namedtuple('plotObj', ['df', 'x', 'y'])
-    dPCA.df = pd.DataFrame(data=pcCoordinates, columns=['X', 'Y'])
+    dPCA.df = pd.DataFrame(data=pcCoordinates, columns=['V1', 'V2'])
     dPCA.df['Contig'] = contigVector
     dPCA.df['Cluster'] = clusterVector
 
@@ -189,7 +187,7 @@ def PlotClusters(plotObj, colourLookup, outputName):
 
     ''' Plot the points '''
     colValues = [ colourLookup[x] for x in plotObj.df.Cluster ]
-    plt.scatter(plotObj.df.X, plotObj.df.Y, c=colValues)
+    plt.scatter(plotObj.df.V1, plotObj.df.V2, c=colValues)
 
     ''' For each cluster, add a centroid label '''
     for clusterName in sorted( plotObj.df.Cluster.unique() ):
@@ -214,10 +212,10 @@ def PlotConvexHulls(plotObj, colourLookup, outputName):
         ''' Can only do a ConvexHull if there are at least 3 points '''
         if nRow >= 3:
 
-            hull = ConvexHull( tempdf.loc[ : , ['X', 'Y'] ].values )
+            hull = ConvexHull( tempdf.loc[ : , ['V1', 'V2'] ].values )
             vDF = tempdf.iloc[ hull.vertices , : ]
 
-            plt.fill( vDF.X, vDF.Y, c=colourLookup[clusterName], alpha=0.5 )
+            plt.fill( vDF.V1, vDF.V2, c=colourLookup[clusterName], alpha=0.5 )
             x, y = _returnCentroid(tempdf)
             plt.text(x, y, clusterName.replace('Cluster_', ''), fontsize=10)
 
@@ -227,7 +225,7 @@ def PlotConvexHulls(plotObj, colourLookup, outputName):
     _produceAndSavePlot(plt, plotObj.x, plotObj.y, outputName, 'convex')
 
 def _returnCentroid(df):
-    return ( np.median(df.X), np.median(df.Y) )
+    return ( np.median(df.V1), np.median(df.V2) )
 
 def _produceAndSavePlot(_plt, xLabel, yLabel, outputName, suffix):
     _plt.grid(True)
@@ -244,7 +242,7 @@ def LogGapStatistics(cEng, outputName):
     cEng.gap_df.to_csv( '{}.gap_stats.txt'.format(outputName), sep='\t', index=False )
 
 def WriteOutputFiles(pointDf, outputName, logSeparate):
-    
+
     ''' The overall table '''
     pointDf.to_csv( '{}.clustered.txt'.format(outputName), sep='\t', index=False)
 
