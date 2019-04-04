@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial import Delaunay, ConvexHull
 from collections import namedtuple
 from sklearn.metrics import matthews_corrcoef
+from scripts.OptionValidator import ValidateDataFrameColumns
 
 class GenomeBin:
 
@@ -14,6 +15,11 @@ class GenomeBin:
         self.binIdentifier = binInstanceTuple.binIdent
 
         self._eTable = pd.read_csv(binInstanceTuple.esomPath, sep='\t')
+        try:
+            ValidateDataFrameColumns(df=self._eTable, columnsRequired=['BinID', 'ContigName', 'ContigBase'])
+        except:
+            print( 'Error parsing data for bin {}, skipping...'.format(binInstanceTuple.binIdent) )
+            return None
         
         self.binPoints = self._eTable[ self._eTable.BinID == binInstanceTuple.binIdent ]
         self.nonbinPoints = self._eTable[ self._eTable.BinID != binInstanceTuple.binIdent ]

@@ -1,11 +1,9 @@
 '''
     A refactored version of the original script, so make use of multithreading
 
-    Note that it's trival to update the header of the points output of the gapstatCluster.py script
-        by simply changing the Cluster column name to BinID (and renaming the old BinID column)
     Debug line
     cd C:/Users/dwai012/Documents/Genomics Aoteoroa/Pipeline Development/ESOM Bin detangler
-    python vizbin_MCCgrow_v3.py -v debug_clusterv3/test.n11.points.txt Cluster_1 Cluster_2 Cluster_3 Cluster_4 Cluster_5 Cluster_6 Cluster_7 Cluster_8 Cluster_9 Cluster_10 Cluster_11
+    python expand_by_mcc.py -e tests/mock.table.txt -o tests/mock.table.core Bin1 Bin3
 '''
 
 import sys, os
@@ -22,13 +20,13 @@ from scripts.OptionValidator import ValidateFile, ValidateInteger, ValidateFloat
 def main():
     
     # Parse options
-    parser = OptionParser()
-    usage = "usage: %prog [options] [starter-bin fasta files]"
+    usageString = "usage: %prog [options] [bin names]"
+    parser = OptionParser(usage=usageString)
 
     parser.add_option('-e', '--esom-table', help='A table produced by the vizbin_files_to_table.py script', dest='esomTable')
     parser.add_option('-o', '--output', help='An output prefix for all generated files (Default: None)', dest='output', default=None)
-    parser.add_option('-s', '--slices', help='Number of slices of each bin to take, projected across the asymptotic function [1 - (1 / (1 + s))] Default = 50', dest='slices', default=50)
-    parser.add_option('-b', '--bias-threshold', help='The weighting at which contigs are assigned to a bin when fragments appear across multiple bins (Default 0.9)', dest='biasThreshold', default=0.9)
+    parser.add_option('-s', '--slices', help='Number of slices of each bin to take (Default: 50)', dest='slices', default=50)
+    parser.add_option('-b', '--bias-threshold', help='The weighting at which contigs are assigned to a bin when fragments appear across multiple bins (Default: 0.9)', dest='biasThreshold', default=0.9)
     parser.add_option('-t', '--threads', help='Number of threads', dest='threads', default=1)
     options, binNames = parser.parse_args()
 
@@ -45,8 +43,9 @@ def main():
         print('Unable to locate any valid contig lists. Aborting...')
         sys.exit()
 
-    ''' Instantiate the bin objects '''
+    ''' Instantiate the bin objects. Failed constructor returns None, so filter these out '''
     binInstances = [ GenomeBin(bP) for bP in binPrecursors ]
+    binInstances = [ b for b in binInstances if b]
 
     ''' Distribute the jobs over the threads provided '''
     tManager = ThreadManager(options.threads, RefineAndPlotBin)
