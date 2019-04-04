@@ -3,7 +3,7 @@
 
     Debug line
     cd C:/Users/dwai012/Documents/Genomics Aoteoroa/Pipeline Development/ESOM Bin detangler
-    python expand_by_mcc.py -e tests/mock.table.txt -o tests/mock.table.core Bin1 Bin3
+    python expand_by_mcc.py -e tests/mock.table.txt -o tests/mock.table Bin1 Bin3
 '''
 
 import sys, os
@@ -63,9 +63,12 @@ def main():
     binInstances = { bI.binIdentifier: bI for bI in binInstances }
     revisedBinInstances = contaminationInstanceRecord.ResolveContaminationByAbundance(binInstances, options.biasThreshold)
 
-    ''' For each bin, write out the core contigs that are trusted at this stage. '''
-    for binInstance in revisedBinInstances.values():
-        GenomeBin.SaveCoreContigs(binInstance)
+    #''' For each bin, write out the core contigs that are trusted at this stage. '''
+    #for binInstance in revisedBinInstances.values():
+    #    GenomeBin.SaveCoreContigs(binInstance)
+    ''' Write a table of the core contigs for each bin. '''
+    coreTable = GenomeBin.CreateCoreTable( revisedBinInstances.values() )
+    coreTable.to_csv( options.output + '.core_table.txt', sep='\t', index=False)
 
 ###############################################################################
 

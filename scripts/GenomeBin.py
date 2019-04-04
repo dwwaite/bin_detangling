@@ -315,6 +315,22 @@ class GenomeBin:
         else:
             print( 'No contigs remain in {}, skipping...'.format(gBin.binIdentifier) )
 
+    @staticmethod
+    def CreateCoreTable(gBinList):
+
+        binMap = []
+
+        for gBin in gBinList:
+            if gBin.coreContigs:
+
+                binMap.extend( [ { 'Bin': gBin.binIdentifier, 'ContigBase': c } for c in gBin.coreContigs ] )
+
+            else:
+                print( 'No contigs remain in {}, skipping...'.format(gBin.binIdentifier) )
+                continue
+
+        return pd.DataFrame(binMap)
+
     #endregion
 
 class ContaminationRecordManager():
