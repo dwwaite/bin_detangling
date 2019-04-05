@@ -180,6 +180,10 @@ class MachineController():
 
                         else:
 
+                            '''
+                                Getting conversion errors here. To check...
+                            '''
+                            
                             classificationAccuracyList.append( { 'Model': modelType,
                                                                 'Iteration': splitIteration,
                                                                 'F1': f1_score(labelValidate, modelCalls, average='weighted'),
@@ -259,12 +263,15 @@ class MachineController():
         for opt in self._validOptions:
 
                     for i, model in enumerate(self._models[opt]):
-
+                        
                         modelCalls, modelConf = self._classifyData(opt, model, classificationData)
 
                         for contig, call, conf in zip(classificationContigs, modelCalls, modelConf):
-
                             modelReport.append( {'Contig': contig, 'Model': opt, 'Iter': i + 1, 'Bin': call, 'Confidence': conf} )
+                        # Mod: Return the distribution of confidences
+                        #modelConf = self._classifyData(opt, model, classificationData)
+                        #for contig, conf in zip(classificationContigs, modelConf):
+                        #    modelReport.append( { **{'Contig': contig, 'Model': opt, 'Iter': i + 1 }, **conf } )
 
         return pd.DataFrame(modelReport)
 
@@ -290,12 +297,18 @@ class MachineController():
 
             for i, hit, conf in tManager.results:
                 callResults[i], confResults[i] = hit, conf
+            # Mod: Return the distribution of confidences
+            #for i, conf in tManager.results: confResults[i] = conf
 
         else:
             for i in range(nEntries):
                 callResults[i], confResults[i] = self._calcConfidence(_model, hitMap, _data.iloc[i,:])
+                # Mod: Return the distribution of confidences
+                #confResults[i] = self._calcConfidence(_model, hitMap, _data.iloc[i,:])
 
         return callResults, confResults
+        # Mod: Return the distribution of confidences
+        #return confResults
 
     def _calcConfidenceRf(self, args):
 
@@ -310,6 +323,9 @@ class MachineController():
         topHit, topConf = self._extractTopHit(callsDict)
 
         _q.put( (_index, topHit, topConf / nTrees) )
+        # Mod: Return the distribution of confidences
+        #for c, v in callsDict.items(): callsDict[c] = v / nTrees
+        #_q.put( (_index, callsDict) )
 
     def _calcConfidence(self, _model, _hitMap, _dataRow):
 
@@ -318,6 +334,8 @@ class MachineController():
         ''' Reshape the data as a dict of probabilities, then return the top value and confidence '''
         callsDict = { c: p for c, p in zip(_model.classes_, pred) }
         return self._extractTopHit(callsDict)
+        # Mod: Return the distribution of confidences
+        #return callsDict
 
     def _extractTopHit(self, _classificationDict):
         topHit = max(_classificationDict.items(), key=itemgetter(1))[0]

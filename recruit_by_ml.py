@@ -1,31 +1,21 @@
 '''
-    De novo run:
-    python recruit_by_ml.py -e tests/recruit_bin.vizbin_table.csv -s 15 -t 2 -m RF,NN,SVML,SVMR,SVMP --use-bin-membership --evaluate-only -c tests/recruit_bin.coverage.txt tests/recruit_bin137.txt tests/recruit_bin341.txt tests/recruit_bin403.txt tests/recruit_bin417.txt
-
-    Reboot run, skipping the SVMP model
-    python recruit_by_ml.py -e tests/recruit_bin.vizbin_table.csv -s 15 -t 2 --reload -m RF,NN,SVML,SVMR --use-bin-membership -c tests/recruit_bin.coverage.txt tests/recruit_bin137.txt tests/recruit_bin341.txt tests/recruit_bin403.txt tests/recruit_bin417.txt
-
-    Rapid/debug run
-    python recruit_by_ml.py -e tests/recruit_bin.vizbin_table.csv -s 15 -m NN,SVMR --use-bin-membership --evaluate-only -c tests/recruit_bin.coverage.txt tests/recruit_bin137.txt tests/recruit_bin341.txt tests/recruit_bin403.txt tests/recruit_bin417.txt
-    python recruit_by_ml.py -e tests/recruit_bin.vizbin_table.csv -s 15 -m NN,SVMR --use-bin-membership --reload -c tests/recruit_bin.coverage.txt tests/recruit_bin137.txt tests/recruit_bin341.txt tests/recruit_bin403.txt tests/recruit_bin417.txt
-
-    Rapid/debug run with randomised contig sets
-    Mock data is returning extremely high accuracy which is good, but concerning.
-    Running with totally randomised values gives expected bad results, so this does not appear to be code error.
-
-    python recruit_by_ml.py -e tests/recruit_bin.vizbin_table.csv -o shuffle.with_bins -s 15 -t 2 -m RF,NN,SVML,SVMR,SVMP --use-bin-membership --evaluate-only -c tests/recruit_bin.coverage.txt tests/shuffle0.txt tests/shuffle1.txt tests/shuffle2.txt tests/shuffle3.txt
-    python recruit_by_ml.py -e tests/recruit_bin.vizbin_table.csv -o shuffle.no_bins -s 15 -t 2 -m RF,NN,SVML,SVMR,SVMP --evaluate-only -c tests/recruit_bin.coverage.txt tests/shuffle0.txt tests/shuffle1.txt tests/shuffle2.txt tests/shuffle3.txt
-
+    Rapid/debug run - drop RF for increased speed
+    python recruit_by_ml.py -e tests/mock.table.txt --evaluate-only tests/mock.table.core_table.txt
+    python recruit_by_ml.py -e tests/mock.table.txt --reload -m RF,SVML,SVMP,SVMR tests/mock.table.core_table.txt
 '''
 
 import sys, os, re
 import pandas as pd
 import numpy as np
 from optparse import OptionParser
+from collections import namedtuple
 import matplotlib.pyplot as plt
 
 # sklearn libraries for model training, classification, and saving
 from sklearn import preprocessing
+
+# Confidence intervals for final assignment of contig
+import scipy.stats as st
 
 # My functions and classes
 from scripts.OptionValidator import ValidateFile, ValidateInteger, ValidateStringParameter, ValidateDataFrameColumns
@@ -34,7 +24,7 @@ from scripts.MachineModelController import MachineController
 def main():
 
     # Parse options
-    usageString = "usage: %prog [options] [contig list files]"
+    usageString = "usage: %prog [options] [core contig table]"
     parser = OptionParser(usage=usageString)
 
     # Basic options
@@ -55,7 +45,8 @@ def main():
     parser.add_option('--rf-trees', help='Number of decision trees for random forest classification (Default: 1000)', dest='rf_trees', default=1000)
     parser.add_option('--nn-nodes', help='Comma-separated list of the number of neurons in the input, hidden, and output layers (Default: Input = number of features + 1, Output = number of classification outcomes, Hidden = mean of Input and Output)', dest='nn_nodes', default=None)
 
-    options, coreContigLists = parser.parse_args()
+    options, args = parser.parse_args()
+    coreContigFile = args[0]
 
     '''
         Pre-workflow overhead: Validation of user choices.
@@ -82,15 +73,20 @@ def main():
     '''
     userTable = pd.read_csv(options.esomTable, sep='\t')
     ValidateDataFrameColumns(df=userTable, columnsRequired=['BinID', 'ContigName', 'ContigBase'])
+    coreContigTable = pd.read_csv(coreContigFile, sep='\t')
+    ValidateDataFrameColumns(df=coreContigTable, columnsRequired=['Bin', 'ContigBase'])
+   
+    esomCore, esomCloud = ParseEsomForTraining(userTable, options.coverageTable, options.use_bin_membership, coreContigTable)
+    #_peakIntoObj(esomCore)
+    #_peakIntoObj(esomCloud)
+    #sys.exit()
 
-    esomTable, featureList, contigList, binMembershipList = ParseEsomForTraining(userTable, options.coverageTable, options.use_bin_membership, coreContigLists)
-    
     options.models = ExtractAndVerifyModelChoices(options.models)
     options.seed = ValidateInteger(userChoice=options.seed, parameterNameWarning='random seed', behaviour='skip')
     options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
     options.cross_validate = ValidateInteger(userChoice=options.cross_validate, parameterNameWarning='number of training splits', behaviour='default', defaultValue=10)
     options.rf_trees = ValidateInteger(userChoice=options.rf_trees, parameterNameWarning='decision trees', behaviour='default', defaultValue=1000)
-    options.nn_nodes = ExtractAndVerifyLayerChoices(options.nn_nodes, featureList, coreContigLists)
+    options.nn_nodes = ExtractAndVerifyLayerChoices(options.nn_nodes, esomCore.ordValues.columns, coreContigTable)
 
     '''
 
@@ -115,10 +111,9 @@ def main():
     #machineModelController.to_string()
 
     ''' Step 2. '''
-    trainingData, trainingLabels, classificationData, classificationContigs = SplitData(esomTable, contigList, binMembershipList)
 
     if not options.reload:
-        machineModelController.TrainModels(options.cross_validate, trainingData, trainingLabels, options.seed)
+        machineModelController.TrainModels(options.cross_validate, esomCore.ordValues, esomCore.coreBinList, options.seed)
 
     ''' Step 3. '''
     if not options.reload:
@@ -130,23 +125,16 @@ def main():
 
     ''' Step 4. '''
     # Internal validation of the confidence ranges seen for true and false positive results
-    # Options:
-    #   Confidence intervals - won't work, training data is too specific
-    #   Odds ratio - 
-    #if not options.reload:
-    confidenceFrame, confidenceContigs, confidenceBinMembership = ParseEsomForErrorProfiling(options.esomTable, options.coverageTable, options.use_bin_membership, coreContigLists, featureList)
-    confidenceResult = machineModelController.ClassifyByEnsemble(confidenceFrame, confidenceContigs)
-    confidenceResult = AttachBinMembership(confidenceResult, confidenceContigs, confidenceBinMembership)
-    confidenceResult.to_csv('conf.txt', index=False, sep='\t')
-    '''
-        
-        confidenceDistributions = ComputeConfidenceProfiles(confidenceResult, outputFileStub)
-        
-        errorModel = machineModelController.ClassifyByEnsemble()
-    '''
 
-    #ensembleResult = machineModelController.ClassifyByEnsemble(classificationData, classificationContigs)
-    #ensembleResult.to_csv('debug.txt', index=False, sep='\t')
+    esomConfidence = ParseEsomForErrorProfiling(userTable, options.coverageTable, options.use_bin_membership, coreContigTable)
+
+    #_peakIntoObj(esomConfidence)
+
+    confidenceClassify = machineModelController.ClassifyByEnsemble(esomConfidence.ordValues, esomConfidence.contigList)
+    confidenceCritical = ProduceConfidenceIntervals(esomConfidence, confidenceClassify, outputFileStub)
+
+    ensembleResult = machineModelController.ClassifyByEnsemble(esomCloud.ordValues, esomCloud.contigList)
+    ReportFinalAssignments(ensembleResult, confidenceCritical, outputFileStub)
 
 ###############################################################################
 
@@ -182,7 +170,7 @@ def ExtractAndVerifyModelChoices(modelString):
         print('No valid models selected. Aborting...')
         sys.exit()
 
-def ExtractAndVerifyLayerChoices(neuronString, featureList, coreContigList):
+def ExtractAndVerifyLayerChoices(neuronString, featureList, coreContigTable):
 
     ''' If the user has specified an input '''
     if neuronString:
@@ -207,15 +195,22 @@ def ExtractAndVerifyLayerChoices(neuronString, featureList, coreContigList):
 
     ''' Otherwise, infer from the data '''
     iLayer = len(featureList) + 1
-    oLayer = len(coreContigList)
+    oLayer = len( coreContigTable.Bin.unique() )
     hLayer = (iLayer + oLayer) / 2
     return iLayer, int(hLayer), oLayer
+
+def _peakIntoObj(o):
+    print('')
+    print(o.ordValues.head(5))
+    print(o.contigList[0:5] )
+    print( set(o.coreBinList) )
+    print( set(o.originalBinList) )
 
 # endregion
 
 # region User data import
 
-def ParseEsomForTraining(esomTable, coverageTablePath, binMembershipFlag, coreContigLists):
+def ParseEsomForTraining(esomTable, coverageTablePath, binMembershipFlag, coreContigTable):
 
     '''
         Begin by reading in the esomTable that was used in the expand_by_mcc.py script. For each contig, take the average (median) V1 and V2 positions,
@@ -227,10 +222,13 @@ def ParseEsomForTraining(esomTable, coverageTablePath, binMembershipFlag, coreCo
         3. ContigName - The name of the contig fragment. Takes the form ContigBase|<i>
         4. ContigBase - The name of the original contig.
 
-        Output table has the following columns
-        1. V* - Normalised coordinates from ESOM
-        2. Coverage* - Normalised coverage values from each sample
-        3. Bin* - Normalised coordinates from ESOM
+        Return objects are namedtuples with the following values:
+        1. ordValues - The numeric value matrix to be used in training - V* and Coverage* columns
+        2. contigList - The names of the contigs in ordValues
+        3. coreBinList - If contig is a core contig, which bin it belonged to
+        4. originalBinList - The original assignment of the contig
+
+        Also returns a list of the features in the ordValues frames. May not be needed?
     '''
 
     featureList = _identifyFeatureColumns( esomTable.columns )
@@ -246,31 +244,42 @@ def ParseEsomForTraining(esomTable, coverageTablePath, binMembershipFlag, coreCo
 
     preTrainingFrame = pd.DataFrame(preTrainingList)
 
-    ''' If required, append coverage information and normalise it '''
+    ''' If required, append coverage information and normalise it.
+        Normalisation is not performed if model training is done of ordination values alone '''
     if coverageTablePath:
         preTrainingFrame, coverageFeatures = _appendCoverageTable(preTrainingFrame, coverageTablePath, 'Contig')
+        preTrainingFrame = _scaleColumns(preTrainingFrame, featureList)
         preTrainingFrame = _scaleColumns(preTrainingFrame, coverageFeatures)
-
-        featureList.extend( coverageFeatures )
 
     ''' If required, encode bin identity as new factors '''
     if binMembershipFlag:
-        preTrainingFrame, additionalFeatures = _appendBinMembership(preTrainingFrame, 'OriginalBin')
-        featureList.extend( additionalFeatures )
+        preTrainingFrame, _ = _appendBinMembership(preTrainingFrame, 'OriginalBin')
 
     '''
-        Finally, update the bin informating.
+        Update the bin informating.
              For core contigs, assign bin identity
              For other contigs, assign placeholder value
+        Finally, pop off the text columns
     '''
-    trainingBinList = [ b for b in _binMembershipGenerator(preTrainingFrame.Contig, coreContigLists) ]
+    preTrainingFrame['CoreBin'] = [ b for b in _binMembershipGenerator(preTrainingFrame.Contig, coreContigTable) ]
 
-    ''' Pop off the Contigs column '''
-    contigList = list( preTrainingFrame.pop('Contig') )
+    validBins = list( coreContigTable.Bin.unique() )
+    esomCore = _bindToTableObj( preTrainingFrame[ preTrainingFrame.CoreBin != '-' ] )
+    esomCloud = _bindToTableObj( preTrainingFrame[ (preTrainingFrame.CoreBin == '-') &
+                                                   (preTrainingFrame.OriginalBin.isin(validBins)) ] )
 
-    return preTrainingFrame, featureList, contigList, trainingBinList
+    return esomCore, esomCloud
 
-def ParseEsomForErrorProfiling(esomTablePath, coverageTablePath, binMembershipFlag, coreContigLists, featureList):
+def _bindToTableObj(dfSlice):
+
+    eObj = namedtuple('eObj', 'ordValues contigList coreBinList originalBinList')
+    ctL = dfSlice.pop('Contig')
+    crL = dfSlice.pop('CoreBin')
+    obL = dfSlice.pop('OriginalBin')
+
+    return eObj(ordValues=dfSlice, contigList=ctL, coreBinList=crL, originalBinList=obL)
+
+def ParseEsomForErrorProfiling(esomTable, coverageTablePath, binMembershipFlag, coreContigTable):
 
     '''
         Re-read the original ESOM table and format it into a per-fragment view of the data.
@@ -278,25 +287,20 @@ def ParseEsomForErrorProfiling(esomTablePath, coverageTablePath, binMembershipFl
 
         Input and output data take the same form as ParseEsomForTraining().
     '''
-    esomTable = pd.read_csv(esomTablePath, sep='\t')
-    esomTable.rename(index=str, columns={'ContigBase': 'Contig'}, inplace=True )
+    esomTableErr = esomTable.rename(index=str, columns={'ContigName': 'Contig', 'BinID': 'OriginalBin'} )
 
     ''' Append and normalise data, as for training workflow '''
     if coverageTablePath:
-        esomTable, coverageFeatures = _appendCoverageTable(esomTable, coverageTablePath, 'Contig')
-        esomTable = _scaleColumns(esomTable, coverageFeatures)
+        esomTableErr, coverageFeatures = _appendCoverageTable(esomTableErr, coverageTablePath, 'Contig')
+        esomTableErr = _scaleColumns(esomTableErr, coverageFeatures)
 
-    if binMembershipFlag: esomTable, _ = _appendBinMembership(esomTable, 'BinID')
+    if binMembershipFlag: esomTableErr, _ = _appendBinMembership(esomTableErr, 'BinID')
 
-    ''' Slice the esomTable down to just the expected columns '''
+    ''' Slice the esomTableErr down to just the expected columns '''
+    fragmentNames = esomTableErr.pop('ContigBase')
+    esomTableErr['CoreBin'] = [ b for b in _binMembershipGenerator(fragmentNames, coreContigTable) ]
 
-    esomTable['binMembership'] = [ b for b in _binMembershipGenerator(esomTable.Contig, coreContigLists) ]
-    esomTable = esomTable[ esomTable.binMembership != '-' ]
-
-    binMembership = list( esomTable['binMembership'] )
-    contigNames = list( esomTable['Contig'] )
-
-    return esomTable.loc[:,featureList], contigNames, binMembership
+    return _bindToTableObj( esomTableErr[ esomTableErr.CoreBin != '-' ] )
 
 def _identifyFeatureColumns(columnValues):
     ''' Simple regex for a V with any number of digits trailing. It is highly unlikely we will ever use more than half a dozen '''
@@ -333,16 +337,9 @@ def _scaleColumns(_df, _columns, _method=None):
 
     return _df
 
-def _binMembershipGenerator(contigstoAssign, coreContigLists):
+def _binMembershipGenerator(contigstoAssign, coreContigTable):
 
-    contigMap = {}
-    for coreContigList in coreContigLists:
-
-        binFile = os.path.split(coreContigList)[1]
-        binName = os.path.splitext(binFile)[0]
-
-        nDict = { x.strip(): binName for x in open(coreContigList, 'r') }
-        contigMap = { **contigMap, **nDict }
+    contigMap = { c: b for c, b in zip(coreContigTable.ContigBase, coreContigTable.Bin) }
 
     for contig in contigstoAssign:
 
@@ -352,57 +349,62 @@ def _binMembershipGenerator(contigstoAssign, coreContigLists):
 
 # region Model building and testing
 
-def SplitData(_esomTable, _contigList, _binMembershipList):
+def ProduceConfidenceIntervals(esomConfidence, esomConfidenceClassify, outputFileStub):
 
-    inLocs = []
-    outLocs = []
-    trainLabels = []
-    classifyContigs = []
+    ''' Classify each contig in the confidence profile set, then append the original/correct bin membership and log the results '''
+    esomConfidenceClassify['OriginalBin'] = _attachBinMembership(esomConfidenceClassify, esomConfidence.contigList, esomConfidence.originalBinList)
 
-    for i, b in enumerate(_binMembershipList):
+    esomConfidenceClassify.to_csv('{}.conf_profile.txt'.format(outputFileStub), index=False, sep='\t')
 
-        if b == '-':
-            outLocs.append(i)
-            classifyContigs.append( _contigList[i] )
 
-        else:
-            inLocs.append(i)
-            trainLabels.append(b)
+    ''' Iterate through the assignments, and find the per bin upper bound of the 99% confidence interval for incorrectly assigned contigs '''
+    CI_BOUND = 0.99
+    confidenceCritical = _computeConfidenceProfiles(esomConfidenceClassify, outputFileStub, CI_BOUND)
 
-    trainDf = _esomTable.iloc[ inLocs , : ]
-    classifyDf = _esomTable.iloc[ outLocs , : ]
+    return confidenceCritical
 
-    return trainDf, trainLabels, classifyDf, classifyContigs
-
-def AttachBinMembership(confidenceResult, confidenceContigs, confidenceBinMembership):
+def _attachBinMembership(confidenceResult, confidenceContigs, confidenceBinMembership):
 
     binMapper = { c: b for c, b in zip(confidenceContigs, confidenceBinMembership) }
-    confidenceResult['OriginalBin'] = [ binMapper[c] for c in confidenceResult.Contig ]
-    return confidenceResult
+    return [ binMapper[c] for c in confidenceResult.Contig ]
 
-def ComputeConfidenceProfiles(confidenceResult, outputFileStub):
+def _computeConfidenceProfiles(confidenceResult, outputFileStub, CI_BOUND):
+
+    binErrorProfile = {}
 
     for binName, df in confidenceResult.groupby('OriginalBin'):
 
-        print( df.OriginalBin.unique() )
         correctAssignmentConf = df[ df.Bin == df.OriginalBin ].Confidence
         incorrectAssignmentConf = df[ df.Bin != df.OriginalBin ].Confidence
 
+        ciLow, ciHigh = st.t.interval(CI_BOUND, len(incorrectAssignmentConf)-1, loc=np.mean(incorrectAssignmentConf), scale=st.sem(incorrectAssignmentConf))
+        binErrorProfile[binName] = ciHigh
         _plotConfidence(binName, correctAssignmentConf, incorrectAssignmentConf, outputFileStub)
 
+    return binErrorProfile
 
 def _plotConfidence(binName, correctValues, incorrectValues, outputFileStub):
 
-    fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=True, sharey=True)
+    fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, sharex=True)
 
     for a, t, c, v in zip( (ax1, ax2), ('correctly', 'incorrectly'), ('g', 'r'), (correctValues, incorrectValues) ):
         a.set_title( 'Confidence for {} assignment fragments'.format(t) )
         a.hist(v, bins=100, facecolor=c, alpha=0.75)
         a.set_xlim([0, 1])
+        a.set_ylabel('Frequency')
 
     plt.xlabel('Confidence value')
-    plt.ylabel('Frequency')
     plt.savefig('{}.conf_profile_{}.png'.format(outputFileStub, binName), bbox_inches='tight')
+
+def ReportFinalAssignments(ensembleResult, confidenceCritical, outputFileStub):
+
+    ensembleResult['Bin_specific_crit'] = [ confidenceCritical[b] for b in ensembleResult.Bin  ]
+    ensembleResult.to_csv('{}.confidience_assign.txt'.format(outputFileStub), sep='\t', index=False)
+
+    ensembleResult.query('Confidence > Bin_specific_crit', inplace=True)
+
+    for b, df in ensembleResult.groupby('Bin'):
+        open( '{}.{}.assigned_contigs.txt'.format(outputFileStub, b), 'w' ).write( '\n'.join(df.Contig) )
 
 # endregion
 
