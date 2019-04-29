@@ -317,6 +317,7 @@ def ParseEsomForTraining(esomTable, coverageTablePath, binMembershipFlag, coreCo
              For other contigs, assign placeholder value
         Finally, pop off the text columns
     '''
+
     preTrainingFrame['CoreBin'] = [ b for b in _binMembershipGenerator(preTrainingFrame.Contig, coreContigTable) ]
 
     validBins = list( coreContigTable.Bin.unique() )
@@ -390,7 +391,7 @@ def ParseEsomForErrorProfiling(esomTable, coverageTablePath, binMembershipFlag, 
         esomTableErr, coverageFeatures = _appendCoverageTable(esomTableErr, coverageTablePath, 'Contig')
         esomTableErr = _scaleColumns(esomTableErr, coverageFeatures)
 
-    if binMembershipFlag: esomTableErr, _ = _appendBinMembership(esomTableErr, 'BinID')
+    if binMembershipFlag: esomTableErr, _ = _appendBinMembership(esomTableErr, 'OriginalBin')
 
     ''' Slice the esomTableErr down to just the expected columns '''
     fragmentNames = esomTableErr.pop('ContigBase')
@@ -459,7 +460,7 @@ def _appendBinMembership(baseFrame, columnName):
 
     onehotFrame = pd.get_dummies( baseFrame[columnName] )
     newFrame = pd.concat( [baseFrame, onehotFrame], axis=1 )
-    return newFrame.drop(columnName, axis=1), onehotFrame.columns
+    return newFrame, onehotFrame.columns
 
 def _scaleColumns(_df, _columns, _method=None):
 
