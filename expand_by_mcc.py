@@ -36,7 +36,11 @@ def main():
     options.slices = ValidateInteger(userChoice=options.slices, parameterNameWarning='slices', behaviour='default', defaultValue=50)
     options.biasThreshold = ValidateFloat(userChoice=options.biasThreshold, parameterNameWarning='bias threshold', behaviour='default', defaultValue=0.9)
 
-    ''' Parse the values into a list of per-bin settings '''
+    ''' Parse the values into a list of per-bin settings
+        Check that bins specified are actually correct, and if a default value is given, overwrite the list '''
+    if len(binNames) == 1 and binNames[0] == '-':
+        binNames = list( pd.read_csv(options.esomTable, sep='\t').BinID )
+
     binPrecursors = GenomeBin.ParseStartingVariables(options.esomTable, options.slices, binNames, options.output)
 
     if not binPrecursors:
