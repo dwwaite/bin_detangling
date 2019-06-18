@@ -96,10 +96,10 @@ def compute_dist(ftable, cov_prefix, cov_weight):
 
         weight_mask = build_weighting_mask(ftable.columns, cov_prefix, cov_weight)
 
-        d = pdist(comp_table_unit, 'euclidean', w=weight_mask)
+        d = pdist(ftable, 'euclidean', w=weight_mask)
 
     else:
-        d = pdist(feature_table, 'euclidean')
+        d = pdist(ftable, 'euclidean')
 
     return squareform(d)
 
