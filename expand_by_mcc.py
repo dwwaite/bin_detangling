@@ -2,20 +2,19 @@
     A refactored version of the original script, so make use of multithreading
 
     Debug line
-    cd C:/Users/dwai012/Documents/Genomics Aoteoroa/Pipeline Development/ESOM Bin detangler
-    python expand_by_mcc.py -e tests/mock.table.txt -o tests/mock.table Bin1 Bin3
+    cd C:/Users/dwait/bin_detangling
+    python expand_by_mcc.py -e tests/mock.table.txt -o tests/debug -
 '''
 
 import sys, os
 import pandas as pd
 import numpy as np
 from optparse import OptionParser
-from collections import namedtuple
 
 # My functions and classes
 from scripts.ThreadManager import ThreadManager
 from scripts.GenomeBin import GenomeBin, ContaminationRecordManager, ContaminationRecord
-from scripts.OptionValidator import ValidateFile, ValidateInteger, ValidateFloat
+from scripts.OptionValidator import ValidateFile, ValidateInteger, ValidateFloat, ValidateDataFrameColumns
 
 def main():
     
@@ -32,6 +31,8 @@ def main():
 
     ''' Validate user choices '''
     options.esomTable = ValidateFile(inFile=options.esomTable, fileTypeWarning='ESOM table', behaviour='abort')
+    ValidateDataFrameColumns( pd.read_csv(options.esomTable, sep='\t'), ['V1', 'V2', 'BinID', 'ContigName', 'ContigBase'])
+
     options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
     options.slices = ValidateInteger(userChoice=options.slices, parameterNameWarning='slices', behaviour='default', defaultValue=50)
     options.biasThreshold = ValidateFloat(userChoice=options.biasThreshold, parameterNameWarning='bias threshold', behaviour='default', defaultValue=0.9)
@@ -39,28 +40,52 @@ def main():
     ''' Parse the values into a list of per-bin settings
         Check that bins specified are actually correct, and if a default value is given, overwrite the list '''
     if len(binNames) == 1 and binNames[0] == '-':
-        binNames = list( pd.read_csv(options.esomTable, sep='\t').BinID )
+        binNames = list( pd.read_csv(options.esomTable, sep='\t').BinID.unique() )
 
     binPrecursors = GenomeBin.ParseStartingVariables(options.esomTable, options.slices, binNames, options.output)
-
-    if not binPrecursors:
+    if len(binPrecursors) == 0:
         print('Unable to locate any valid contig lists. Aborting...')
         sys.exit()
 
-    ''' Instantiate the bin objects. Failed constructor returns None, so filter these out '''
-    binInstances = [ GenomeBin(bP) for bP in binPrecursors ]
-    binInstances = [ b for b in binInstances if b]
+    #
+    # Debugging - working without threading to keep errors on main process
+    #
+    from multiprocessing import Queue, Manager
+    q = Manager().Queue()
+    for bP in binPrecursors:
+        RefineAndPlotBin( (bP, q) )
 
+    _results = []
+    while not q.empty():
+        _results.append( q.get(True) )
+
+    #
+    # DEBUGGING - UP TO HERE
+    #   SEEM TO BE RETURNING NO CONTAM CONTIGS
+    #
+    print(_results)
+
+    #
+    # Debugging - commented out for now
+    #
     ''' Distribute the jobs over the threads provided '''
+    '''
     tManager = ThreadManager(options.threads, RefineAndPlotBin)
     
-    funcArgList = [ (bP, tManager.queue) for bP in binInstances ]
+    funcArgList = [ (bP, tManager.queue) for bP in binPrecursors ]
     #tManager.ActivateMonitorPool(sleepTime=30, funcArgs=funcArgList, trackingString='Completed MCC growth for {} of {} bins.', totalJobSize=len(funcArgList))
     tManager.ActivateMonitorPool(sleepTime=10, funcArgs=funcArgList)
 
+    '''
     ''' Parse the results into the contamination record '''
-    binInstances, contaminationInstanceRecord = ExtractQueuedResults(tManager.results)
+    #binInstances, contaminationInstanceRecord = ExtractQueuedResults(tManager.results)
+    binInstances, contaminationInstanceRecord = ExtractQueuedResults(_results)
+
     contaminationInstanceRecord.IndexRecords()
+
+    print( contaminationInstanceRecord._recordFrame.head() )
+    sys.exit()
+
     contaminationInstanceRecord.CalculateContigDistributions(options.esomTable)
 
     ''' Recasting the binInstances list as a dict, so I can access specific bins at will '''
@@ -85,18 +110,15 @@ def RefineAndPlotBin(argTuple):
                      with specific functions for the steps within the MCC expansion.
                      This change would be cosmetic only, so remains TODO.
     '''
-    binInstance, q = argTuple
+    (bin_name, esom_path, number_of_slices, output_path), q = argTuple
 
-    try:
+    bin_instance = GenomeBin(bin_name, esom_path, number_of_slices, output_path)
 
-        binInstance.ComputeCloudPurity(q)
+    bin_instance.ComputeCloudPurity(q)
 
-        GenomeBin.PlotTrace(binInstance)
-        GenomeBin.PlotContours(binInstance)
-        #GenomeBin.SaveMccTable(binInstance)
-
-    except:
-        print( 'Error processing bin {}, skipping...'.format(binInstance.binIdentifier) )
+    bin_instance.PlotTrace()
+    bin_instance.PlotContours()
+    #GenomeBin.SaveMccTable(bin_instance)
 
 def ExtractQueuedResults(resultsQueue):
 
