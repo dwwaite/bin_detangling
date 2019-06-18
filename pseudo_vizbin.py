@@ -77,11 +77,11 @@ def parse_and_validate_weighting(weight_value):
     weight_value = ValidateFloat(userChoice=weight_value, parameterNameWarning='coverage weighting', behaviour='abort')
 
     if weight_value > 1.0:
-        print('Error: Trying to weight coverage for more than 100\% of data.')
+        print('Error: Trying to weight coverage for more than 100% of data.')
         sys.exit()
 
     elif weight_value < 0:
-        print('Error: Trying to weight coverage for less than 0\% of data.')
+        print('Error: Trying to weight coverage for less than 0% of data.')
         sys.exit()
 
     return weight_value
@@ -124,7 +124,7 @@ def write_output(ftable_name, tsne, output_name=None):
 
         output_name = os.path.splitext(ftable_name)[0] + '.vb_points.txt'
 
-    pd.to_csv(tsne, sep='\t', index=False, header=False)
+    pd.to_csv(tsne, sep=',', index=False, header=False)
 
 ###############################################################################
 if __name__ == '__main__':
