@@ -1,15 +1,13 @@
-import sys # Debug only?
-import os, math, uuid
+import os, math, uuid, operator
+from collections import Counter
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.spatial import Delaunay, ConvexHull
-from collections import namedtuple
 from sklearn.metrics import matthews_corrcoef
 
 class GenomeBin:
 
-    # 'esomPath binIdent numSlices outputPath'
     def __init__(self, bin_name, esom_path, number_of_slices, output_path):
 
         self.bin_name = bin_name
@@ -58,7 +56,7 @@ class GenomeBin:
             contam_record = self._identifyContaminatingContigs(dHull, frame_slice)
 
             ''' Calculate the MCC '''
-            obsContigs = self._resolveObservedArray(frame_slice.ContigName, contam_record['Contigs'])
+            obsContigs = self._resolveObservedArray(frame_slice.ContigName, contam_record.ContigName)
             slice_mcc = matthews_corrcoef(self._expectedContigs, obsContigs)
 
             ''' Record the perimeter and area of the point slice. Note that these are special cases of
@@ -75,12 +73,16 @@ class GenomeBin:
         top_key = self._returnTopKey()
         contam_contigs = self._contam_contigs[ top_key ]
 
-        for b, c in zip(contam_contigs['Bins'], contam_contigs['Contigs']):
-            cRecord = ContaminationRecord(b, c, self.bin_name)
-            qManager.put( (False, cRecord) )
+        for new_bin, contig_base, contig_fragment in zip(contam_contigs.BinID, contam_contigs.ContigBase, contam_contigs.ContigName):
+
+            if not new_bin == self.bin_name:
+
+                cRecord = ContaminationRecord(self.bin_name, new_bin, contig_fragment, contig_base)
+                qManager.put( (False, cRecord) )
 
     def DropContig(self, contigName):
-        self.binPoints = self.binPoints[ self.binPoints.ContigBase != contigName ]
+
+        self.esom_table = self.esom_table[ self.esom_table.ContigBase != contigName ]
 
     """
     def to_string(self):
@@ -106,26 +108,18 @@ class GenomeBin:
     def _identifyContaminatingContigs(self, delaunay_hull, frame_slice):
 
         bMask = delaunay_hull.find_simplex( self.esom_table[ ['V1', 'V2'] ].values ) >= 0
-        contam_record = { 'Bins': [], 'Contigs': [] }
 
         if True in bMask:
-
-            contamEvents = frame_slice.iloc[ bMask , : ]
-
-            #for b, c in zip( list(contamEvents.BinID), list(contamEvents.ContigName) ):
-            for b, c in zip( contamEvents.BinID, contamEvents.ContigName ):
-                if not b == self.bin_name:
-                    contam_record[ 'Bins' ].append(b)
-                    contam_record[ 'Contigs' ].append(c)
-
-        return contam_record
+            return frame_slice.iloc[ bMask , : ]
+        else:
+            return None
 
     def _resolveObservedArray(self, targetSlice, nontargetSlice):
 
         binnedContigs = set(targetSlice)
 
         ''' Need a bit of flow control here, to account for no contaminating contigs '''
-        if nontargetSlice:
+        if set(nontargetSlice):
             binnedContigs = binnedContigs | set(nontargetSlice)
 
         return [ 1 if x in binnedContigs else 0 for x in self.esom_table.ContigName  ]
@@ -146,17 +140,19 @@ class GenomeBin:
     #region Properties
 
     @property
-    def binPoints(self):
-        return self.esom_table[ self.esom_table.BinID == self.bin_name ]
+    def bin_contigs(self):
+        return list( self.esom_table[ self.esom_table.BinID == self.bin_name ].BinID )
 
     @property
-    def nonBinPoints(self):
-        return self.esom_table[ self.esom_table.BinID != self.bin_name ]
+    def nonbin_contigs(self):
+        return list( self.esom_table[ self.esom_table.BinID != self.bin_name ].BinID )
 
     @property
     def centroid(self):
-        x = np.median(self.binPoints.V1)
-        y = np.median(self.binPoints.V2)
+
+        df = self.esom_table[ self.esom_table.BinID == self.bin_name ]
+        x = np.median(df.V1)
+        y = np.median(df.V2)
         return (x, y)
 
     @property
@@ -175,27 +171,6 @@ class GenomeBin:
         '''
         df = pd.DataFrame( self._iteration_scores )
         return [ 4 * np.pi * area / perimeter ** 2 for perimeter, area in zip(df.Perimeter, df.Area) ]
-
-    """
-    @property
-    def bestSlice(self):
-        ''' Makes use of a copy to avoid changing None -> np.nan in the _mccValues list '''
-        mCopy = [ m if m else np.nan for m in self._mccValues ]
-        return np.nanargmax(mCopy)
-
-    """
-
-    """
-    @property
-    def simplexPerimeter(self):
-        ''' Returns as masked version of _simplexPerimeter, ommiting values without a corresponding MCC '''
-        return [ s for (m, s) in zip(self._mccValues, self._simplexPerimeter) if m ]
-
-    @property
-    def simplexArea(self):
-        ''' Returns as masked version of _simplexArea, ommiting values without a corresponding MCC '''
-        return [ a for (m, a) in zip(self._mccValues, self._simplexArea) if m ]
-    """
 
     """
     @property
@@ -221,12 +196,12 @@ class GenomeBin:
         top_key = self._returnTopKey()
 
         ''' Get sets off all contigs in the bin space '''
-        all_contigs = set( self.binPoints.ContigName )
-        all_contam = set( self.nonBinPoints.ContigName )
+        all_contigs = set( self.bin_contigs )
+        all_contam = set( self.nonbin_contigs )
 
         ''' Find the contigs and contamination fragments inside the core '''
         core_contigs = set( self._slice_contigs[top_key].ContigName )
-        contam_contigs = set (self._contam_contigs[top_key]['Contigs'] )
+        contam_contigs = set (self._contam_contigs[top_key].ContigName )
 
         ''' Identify those outside the core '''
         outsider_contigs = all_contigs - core_contigs
@@ -346,92 +321,48 @@ class GenomeBin:
     """
     #endregion
 
-class ContaminationRecordManager():
-
-    ''' This is coded in two phases;
-            1) A list of dicts are used to store the record detected during phase 1 processing.
-            2) The dicts are cast into a DataFrame for querying and results returning in phase 2. '''
-
-    def __init__(self):
-        self._recordFrame = None
-        self._preframeRecords = []
-        self._addedContigs = set()
-        self._contigDistributionRecords = []
-
-    #
-    # Have removed the { 'Displacement': contamRecord.centroidDisplacementBand } part. Don't know how much issue this will cause yet.
-    #
-    def AddRecord(self, contamRecord):
-        self._preframeRecords.append({ 'Contig': contamRecord.contigName,
-                                       'OriginalBin': contamRecord.originalBin,
-                                       'ContigFragment': contamRecord.contigFragmentName,
-                                       'ContaminationBin': contamRecord.contaminationBin })
-
-    def IndexRecords(self):
-        self._recordFrame = pd.DataFrame(self._preframeRecords)
-
-    def CalculateContigDistributions(self, esomTablePath):
-
-        esomTable = pd.read_csv(esomTablePath, sep='\t')
-        contaminationSummary = namedtuple('contaminationSummary', 'originalBin totalFragments contamBin contamAbund carrierBins contigName')
-
-        for contamContig in self._recordFrame.Contig.unique():
-
-            ''' Find where the contig currently sits, and get the total number of fragments '''
-            globalSlice = esomTable[ esomTable.ContigBase == contamContig ]
-            currentBin = globalSlice.BinID.unique()[0]
-            totalFragments = globalSlice.shape[0]
-
-            ''' Find all instances of bins carrying this contig, and how many fragments are in each '''
-            contextSlice = self._recordFrame[ self._recordFrame.Contig == contamContig ]
-            fragmentDistribution = contextSlice.ContaminationBin.value_counts()
-
-            carrierBins = fragmentDistribution.keys()
-            topBin = carrierBins[0]
-            topBinAbund = float(fragmentDistribution[0])
-            altBins = carrierBins[1:] if len(carrierBins) > 1 else []
-
-            cS = contaminationSummary(originalBin=currentBin,
-                                      totalFragments=totalFragments,
-                                      contamBin=topBin,
-                                      contamAbund=topBinAbund,
-                                      carrierBins=altBins,
-                                      contigName=contamContig)
-            self._contigDistributionRecords.append(cS)
-
-    def ResolveContaminationByAbundance(self, binInstanceDict, biasThreshold):
-
-        for contamEvent in self._contigDistributionRecords:
-
-                ''' First condition, does this count as a contaminant? Second condition, was the bin specified in this iteration '''
-                if float(contamEvent.contamAbund) / contamEvent.totalFragments > biasThreshold and contamEvent.originalBin in binInstanceDict:
-
-                    binInstanceDict[ contamEvent.originalBin ].DropContig(contamEvent.contigName)
-
-                elif contamEvent.contamBin in binInstanceDict:
-
-                    ''' If the first condition was failed, remove in the reverse if the bin was specified in this iteration
-                        This gives a benefit-of-the-doubt weighting to the original bin, which is intended '''
-                    binInstanceDict[ contamEvent.contamBin ].DropContig(contamEvent.contigName)
-
-                ''' Remove the bin from any other carrier, as required '''
-                for carrierBin in contamEvent.carrierBins:
-    
-                    if carrierBin in binInstanceDict: binInstanceDict[ carrierBin ].DropContig(contamEvent.contigName)
-
-        return binInstanceDict
-
-    @staticmethod
-    def ExtractContigName(contigFragmentName):
-        return '|'.join( contigFragmentName.split('|')[0:-1] )
-
 class ContaminationRecord():
 
-    def __init__(self, original_bin, contig_fragment_name, new_bin):
-        self.contigName = ContaminationRecordManager.ExtractContigName(contig_fragment_name)
-        self.contigFragmentName = contig_fragment_name
-        self.originalBin = original_bin
-        self.contaminationBin = new_bin
+    def __init__(self, current_bin, new_bin, contig_fragment, contig_base):
 
-    def to_string(self):
-        print( 'Bin: {}, contig ({}) from bin {}'.format(self.originalBin, self.contigName, self.contaminationBin) )
+        self.current_bin = current_bin
+        self.new_bin = new_bin
+        self.contig_fragment = contig_fragment
+        self.contig_base = contig_base
+
+    @staticmethod
+    def BuildContaminationFrame(contam_record_list):
+
+        preframe_list = [ { 'ContigBase': cr.contig_base, 'CurrentBin': cr.current_bin, 'ContigFragment': cr.contig_fragment, 'ContaminationBin': cr.new_bin } for cr in contam_record_list ]
+        return pd.DataFrame(preframe_list)
+
+    @staticmethod
+    def CountContigFragments(esom_table):
+
+        return { contig: df.shape[0] for contig, df in pd.read_csv(esom_table, sep='\t').groupby('ContigBase') }
+
+    @staticmethod
+    def ResolveContaminationByAbundance(bin_instance_dict, contam_table, contam_counter, bias_threshold):
+
+        for contig, fragment_df in contam_table.groupby('ContigBase'):
+
+            ''' Count the number of contamination fragments, then find the bin holding the most '''
+            contam_bin_dist = dict( Counter( fragment_df.ContaminationBin ) )
+            top_contam_bin = max(contam_bin_dist.items(), key=operator.itemgetter(1))[0]
+
+            ''' Create a list of all contamination bins
+                If a contamination bin passes the threshold, drop it from the original bin and assign it to the contamination one '''
+            current_bin = fragment_df.CurrentBin.values[0]
+            contam_bins = list( fragment_df.ContaminationBin.unique() )
+
+            if float( contam_bin_dist[top_contam_bin] ) / contam_counter[contig] >= bias_threshold:
+
+                bin_instance_dict[ current_bin ].DropContig(contig)
+                contam_bins = contam_bins.remove(top_contam_bin)
+            
+            if contam_bins:
+
+                for contam_bin in contam_bins:
+                    bin_instance_dict[ contam_bin ].DropContig(contig)
+
+        return bin_instance_dict

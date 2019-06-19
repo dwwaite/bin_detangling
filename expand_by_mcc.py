@@ -13,7 +13,7 @@ from optparse import OptionParser
 
 # My functions and classes
 from scripts.ThreadManager import ThreadManager
-from scripts.GenomeBin import GenomeBin, ContaminationRecordManager, ContaminationRecord
+from scripts.GenomeBin import GenomeBin, ContaminationRecord
 from scripts.OptionValidator import ValidateFile, ValidateInteger, ValidateFloat, ValidateDataFrameColumns
 
 def main():
@@ -59,15 +59,6 @@ def main():
     while not q.empty():
         _results.append( q.get(True) )
 
-    #
-    # DEBUGGING - UP TO HERE
-    #   SEEM TO BE RETURNING NO CONTAM CONTIGS
-    #
-    print(_results)
-
-    #
-    # Debugging - commented out for now
-    #
     ''' Distribute the jobs over the threads provided '''
     '''
     tManager = ThreadManager(options.threads, RefineAndPlotBin)
@@ -78,27 +69,40 @@ def main():
 
     '''
     ''' Parse the results into the contamination record '''
-    #binInstances, contaminationInstanceRecord = ExtractQueuedResults(tManager.results)
-    binInstances, contaminationInstanceRecord = ExtractQueuedResults(_results)
+    #bin_instances, contamination_instance = ExtractQueuedResults(tManager.results)
+    bin_instances, contamination_instances = ExtractQueuedResults(_results)
 
-    contaminationInstanceRecord.IndexRecords()
-
-    print( contaminationInstanceRecord._recordFrame.head() )
-    sys.exit()
-
-    contaminationInstanceRecord.CalculateContigDistributions(options.esomTable)
+    contam_table = ContaminationRecord.BuildContaminationFrame(contamination_instances)
+    contam_counter = ContaminationRecord.CountContigFragments(options.esomTable)
 
     ''' Recasting the binInstances list as a dict, so I can access specific bins at will '''
-    binInstances = { bI.binIdentifier: bI for bI in binInstances }
-    revisedBinInstances = contaminationInstanceRecord.ResolveContaminationByAbundance(binInstances, options.biasThreshold)
+    bin_instances = { bI.bin_name: bI for bI in bin_instances }
+    revisedBinInstances = ContaminationRecord.ResolveContaminationByAbundance(bin_instances, contam_table, contam_counter, options.biasThreshold)
 
+    bin_precursors = { b: GenomeBin(b, e, n, o) for (b, e, n, o) in binPrecursors }
+
+    for k, v in revisedBinInstances.items():
+
+        print(k)
+        print(v)
+        print(bin_precursors[k])
+        print( 'Original: {}'.format( len(bin_precursors[k].esom_table.ContigBase.unique() ) ) )
+        print( 'Refined: {}'.format(  len(v.esom_table.ContigBase.unique() ) ) )
+
+    #
+    # DEBUGGING - UP TO HERE
+    #
+
+    """
     #''' For each bin, write out the core contigs that are trusted at this stage. '''
     #for binInstance in revisedBinInstances.values():
     #    GenomeBin.SaveCoreContigs(binInstance)
     ''' Write a table of the core contigs for each bin. '''
+
+
     coreTable = GenomeBin.CreateCoreTable( revisedBinInstances.values() )
     coreTable.to_csv( options.output + '.core_table.txt', sep='\t', index=False)
-
+    """
 ###############################################################################
 
 #region Bin refinement functions
@@ -122,8 +126,8 @@ def RefineAndPlotBin(argTuple):
 
 def ExtractQueuedResults(resultsQueue):
 
-    cIR = ContaminationRecordManager()
-    updatedBinList = []
+    updated_bin_list = []
+    contam_record_list = []
 
     '''
         The Queue object contains tuples of (bool, object), where the bool refers to whether the object is a GenomeBin or not.
@@ -132,11 +136,11 @@ def ExtractQueuedResults(resultsQueue):
     for isBin, obj in resultsQueue:
 
         if isBin:
-            updatedBinList.append(obj)
+            updated_bin_list.append(obj)
         else:
-            cIR.AddRecord(obj)
+            contam_record_list.append(obj)
 
-    return updatedBinList, cIR
+    return updated_bin_list, contam_record_list
 
 #endregion
 
