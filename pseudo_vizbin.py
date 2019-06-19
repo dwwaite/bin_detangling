@@ -124,7 +124,7 @@ def write_output(ftable_name, tsne, output_name=None):
 
         output_name = os.path.splitext(ftable_name)[0] + '.vb_points.txt'
 
-    tsne.to_csv(output_name, sep=',', index=False, header=False)
+    pd.DataFrame(tsne).to_csv(output_name, sep=',', index=False, header=False)
 
 ###############################################################################
 if __name__ == '__main__':
