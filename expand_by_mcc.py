@@ -91,8 +91,7 @@ def main():
 
     #
     # DEBUGGING - UP TO HERE
-    #
-
+    # 
     """
     #''' For each bin, write out the core contigs that are trusted at this stage. '''
     #for binInstance in revisedBinInstances.values():
@@ -121,8 +120,8 @@ def RefineAndPlotBin(argTuple):
     bin_instance.ComputeCloudPurity(q)
 
     bin_instance.PlotTrace()
-    bin_instance.PlotContours()
-    #GenomeBin.SaveMccTable(bin_instance)
+    bin_instance.PlotScatter()
+    bin_instance.SaveMccTable()
 
 def ExtractQueuedResults(resultsQueue):
 

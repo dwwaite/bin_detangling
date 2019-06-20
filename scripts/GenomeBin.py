@@ -3,7 +3,7 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.spatial import Delaunay, ConvexHull
+from scipy.spatial import ConvexHull
 from sklearn.metrics import matthews_corrcoef
 
 class GenomeBin:
@@ -29,14 +29,13 @@ class GenomeBin:
 
         last_contigfragment = max(idx for idx, val in enumerate( self.esom_table.BinID ) if val == self.bin_name) + 1
         self.esom_table = self.esom_table.head(last_contigfragment)
-        self._expectedContigs = [ 1 if contig_bin == self.bin_name else 0 for contig_bin in self.esom_table.BinID ]
+        self.mcc_expectation = [ 1.0 if contig_bin == self.bin_name else -1.0 for contig_bin in self.esom_table.BinID ]
 
         ''' Add variables for internal use:
             iteration_scores creates a pd.DataFrame of numeric metrics
             slice, and contam_contigs is a NoSQL-like storage of complex objects '''
         self._iteration_scores = []
-        self._slice_contigs = {}
-        self._contam_contigs = {}
+        self._slice_df_lookup = {}
 
     #region Externally exposed functions
 
@@ -45,49 +44,35 @@ class GenomeBin:
         for frame_slice in self._getNextSlice():
 
             ''' Create a UUID for storing contig records '''
-            slice_key = uuid.uuid4()
-
-            ''' Create hulls for later use'''
-            arr = frame_slice[ ['V1', 'V2'] ].values
-            dHull = Delaunay(arr)
-            q_hull = ConvexHull(arr)
-
-            ''' Identify contaminant contigs '''
-            contam_record = self._identifyContaminatingContigs(dHull, frame_slice)
+            slice_key = uuid.uuid4()          
 
             ''' Calculate the MCC '''
-            obsContigs = self._resolveObservedArray(frame_slice.ContigName, contam_record.ContigName)
-            slice_mcc = matthews_corrcoef(self._expectedContigs, obsContigs)
+            slice_mcc = self._compute_mcc(frame_slice)
 
-            ''' Record the perimeter and area of the point slice. Note that these are special cases of
-                the QHull object for a 2D shape. If we project to more dimensions, this will no longer be valid '''
+            ''' Record the perimeter and area of the point slice.
+                Note that these are special cases of the ConvexHull for a 2D shape. If we project to more dimensions, this will no longer be valid '''
+            q_hull = ConvexHull( frame_slice[ ['V1', 'V2'] ].values )
             slice_area = q_hull.volume
             slice_perimeter = q_hull.area
 
-            self._storeQualityValues(slice_mcc, slice_key, slice_area, slice_perimeter, frame_slice, contam_record)
+            self._storeQualityValues(slice_mcc, slice_key, slice_area, slice_perimeter, frame_slice )
 
         ''' Have two data types to store in the qManager - the modified bin object, and contamination records
             Store a tuple, with the first value as a binary switch for bin vs contam '''        
         qManager.put( (True, self) )
 
-        top_key = self._returnTopKey()
-        contam_contigs = self._contam_contigs[ top_key ]
+        top_key = self.top_key
+        contam_contigs = self.slice_contigs_nonbin(top_key)
 
         for new_bin, contig_base, contig_fragment in zip(contam_contigs.BinID, contam_contigs.ContigBase, contam_contigs.ContigName):
 
-            if not new_bin == self.bin_name:
-
-                cRecord = ContaminationRecord(self.bin_name, new_bin, contig_fragment, contig_base)
-                qManager.put( (False, cRecord) )
+            cRecord = ContaminationRecord(self.bin_name, new_bin, contig_fragment, contig_base)
+            qManager.put( (False, cRecord) )
 
     def DropContig(self, contigName):
 
         self.esom_table = self.esom_table[ self.esom_table.ContigBase != contigName ]
 
-    """
-    def to_string(self):
-        return 'Name: {}, Contigs: {}, Best MCC: {}, '.format(self.bin_name, len(self.binPoints.ContigBase.unique()), self._mccValues[ self._bestSlice ])
-    """
     #endregion
 
     #region Internal manipulation functions
@@ -99,41 +84,37 @@ class GenomeBin:
 
     def _getNextSlice(self):
 
+        '''
+            This function returns slices along the full bin space divide amongst all points within it.
+            Alternately, could map the values across only the bin contigs?
+        '''
         n_contigs = self.esom_table.shape[0]
         for x in range(1, self.number_of_slices+1):
 
             hits = np.sin( x / self.number_of_slices * np.pi/2 ) * n_contigs
             yield self.esom_table.head( int(hits) )
 
-    def _identifyContaminatingContigs(self, delaunay_hull, frame_slice):
+    def _compute_mcc(self, slice_df):
 
-        bMask = delaunay_hull.find_simplex( self.esom_table[ ['V1', 'V2'] ].values ) >= 0
+        obs_vector = [-1.0] * len( self.mcc_expectation )
+        for i in range(0, slice_df.shape[0]): obs_vector[i] = 1.0
 
-        if True in bMask:
-            return frame_slice.iloc[ bMask , : ]
-        else:
-            return None
+        return matthews_corrcoef(self.mcc_expectation, obs_vector)
 
-    def _resolveObservedArray(self, targetSlice, nontargetSlice):
-
-        binnedContigs = set(targetSlice)
-
-        ''' Need a bit of flow control here, to account for no contaminating contigs '''
-        if set(nontargetSlice):
-            binnedContigs = binnedContigs | set(nontargetSlice)
-
-        return [ 1 if x in binnedContigs else 0 for x in self.esom_table.ContigName  ]
-
-    def _storeQualityValues(self, mcc, slice_key, area, perimeter, frame_slice, contam_contigs):
+    def _storeQualityValues(self, mcc, slice_key, area, perimeter, frame_slice):
 
         self._iteration_scores.append( { 'MCC': mcc, 'Key': slice_key, 'Area': area, 'Perimeter': perimeter })
-        self._slice_contigs[ slice_key ] = frame_slice
-        self._contam_contigs[slice_key] = contam_contigs
+        self._slice_df_lookup[ slice_key ] = frame_slice
 
-    def _returnTopKey(self):
+    def slice_contigs_bin(self, slice_key):
 
-        top_slice = pd.DataFrame( self._iteration_scores ).nlargest(1, 'MCC')
-        return top_slice.Key.values[0]
+        df = self._slice_df_lookup[ slice_key ]
+        return df[ df.BinID == self.bin_name ]
+
+    def slice_contigs_nonbin(self, slice_key):
+
+        df = self._slice_df_lookup[ slice_key ]
+        return df[ df.BinID != self.bin_name ]
 
     #endregion
 
@@ -141,11 +122,11 @@ class GenomeBin:
 
     @property
     def bin_contigs(self):
-        return list( self.esom_table[ self.esom_table.BinID == self.bin_name ].BinID )
+        return list( self.esom_table[ self.esom_table.BinID == self.bin_name ].ContigName )
 
     @property
     def nonbin_contigs(self):
-        return list( self.esom_table[ self.esom_table.BinID != self.bin_name ].BinID )
+        return list( self.esom_table[ self.esom_table.BinID != self.bin_name ].ContigName )
 
     @property
     def centroid(self):
@@ -156,11 +137,22 @@ class GenomeBin:
         return (x, y)
 
     @property
-    def mccSequence(self):
+    def top_key(self):
+
+        top_slice = pd.DataFrame( self._iteration_scores ).nlargest(1, 'MCC', keep='all')
+
+        if top_slice.shape[0] == 1:
+            return top_slice.Key.values[0]
+
+        else:
+            return top_slice.sort_index(ascending=False).Key.values[0]
+
+    @property
+    def mcc_sequence(self):
         return pd.DataFrame( self._iteration_scores )['MCC']
 
     @property
-    def polsbyPopperScores(self):
+    def polsby_popper_sequence(self):
 
         '''
             This is a metric that was originally described by Cox (1927; Journal of Paleontology 1(3): 179-183),
@@ -193,23 +185,19 @@ class GenomeBin:
 
     def _split_contig_sets(self):
 
-        top_key = self._returnTopKey()
-
-        ''' Get sets off all contigs in the bin space '''
-        all_contigs = set( self.bin_contigs )
-        all_contam = set( self.nonbin_contigs )
+        top_key = self.top_key
 
         ''' Find the contigs and contamination fragments inside the core '''
-        core_contigs = set( self._slice_contigs[top_key].ContigName )
-        contam_contigs = set (self._contam_contigs[top_key].ContigName )
+        core_contigs = set( self.slice_contigs_bin(top_key).ContigName )
+        contam_contigs = set (self.slice_contigs_nonbin(top_key).ContigName )
 
-        ''' Identify those outside the core '''
-        outsider_contigs = all_contigs - core_contigs
-        outsider_contams = all_contam - contam_contigs
+        ''' Find the contigs and contamination fragments outside the core '''
+        outsider_contigs = set( self.bin_contigs ) - core_contigs
+        outsider_contams = set( self.nonbin_contigs ) - contam_contigs
 
         return core_contigs, contam_contigs, outsider_contigs, outsider_contams
 
-    def PlotContours(self):
+    def PlotScatter(self):
 
         ''' Define a colour vector for plotting:
                 1. Core contigs = #1f78b4
@@ -222,11 +210,13 @@ class GenomeBin:
         ''' Clear the plot, if anything came before this call '''
         plt.clf()
 
-        for contig_set, colour in zip([core_contigs, contam_contigs, outsider_contigs, outsider_contams], ['#1f78b4', '#a6cee3', '#e31a1c', '#fb9a99']):
-
+        for contig_set, colour, set_name in zip([outsider_contams, outsider_contigs, core_contigs, contam_contigs],
+                                                        ['#fb9a99', '#a6cee3', '#1f78b4', '#e31a1c'],
+                                                        ['Contamination (outside core)', 'Remainder', 'Core', 'Contamination (inside core)']):
             df = self.esom_table[ self.esom_table.ContigName.isin(contig_set) ]
-            plt.scatter(df.V1, df.V2, c=colour)
+            plt.scatter(df.V1, df.V2, c=colour, label=set_name)
 
+        plt.legend()
         plt.savefig('{}.scatter.png'.format(self.output_path), bbox_inches='tight')
 
     def PlotTrace(self):
@@ -238,19 +228,28 @@ class GenomeBin:
         x_vals = [ x + 1 for x in range(0, len(self._iteration_scores) ) ]
 
         ''' Plot the MCC against the left x-axis '''
-        ax.plot(x_vals, self.mccSequence, color='g', label='MCC')
+        ax.plot(x_vals, self.mcc_sequence, color='g', label='MCC')
         ax.set_xlabel('Contig slice')
         ax.set_ylabel('MCC')
         ax.set_ylim([0.0, 1.0])
 
         ''' Plot the PPP against the right x-axis '''
         ax2 = ax.twinx()
-        ax2.plot(x_vals, self.polsbyPopperScores, color='r', label='PP value')
+        ax2.plot(x_vals, self.polsby_popper_sequence, color='r', label='PP value')
         ax2.set_ylabel('Polsby-Popper value')
         ax2.set_ylim([0.0, 1.0])
 
         fig.legend(loc='upper right')
         plt.savefig('{}.trace.png'.format(self.output_path), bbox_inches='tight')
+
+    def SaveMccTable(self):
+
+        ''' Write out the iteration table, in case users are interested '''
+        output_name = '{}.mcc.txt'.format(self.output_path)
+
+        out_df = pd.DataFrame( self._iteration_scores ).drop('Key', axis=1)
+        out_df['Slice'] = [ i + 1 for i in range( 0, out_df.shape[0] ) ]
+        out_df.to_csv(output_name, index=False, sep='\t')
 
     #endregion
 
@@ -275,21 +274,6 @@ class GenomeBin:
         return return_tuples
 
     """
-    @staticmethod
-    def SaveMccTable(gBin):
-
-        ''' Plot the salient data in a way that can be extracted easily for creating new contig lists.
-            Working idea for now - tab-delimited file with Distance - MCC - ContigNames on each line '''
-        outputWriter = open(gBin.output_path + '.mcc.txt', 'w')
-        for i, s in enumerate(gBin.sliceSequence):
-
-            binDfSlice = gBin.SliceDataFrame(gBin.binPoints, s)
-            contigsNames = list( set( binDfSlice.ContigBase ) )
-            contigsNames = ','.join(contigsNames)
-            outputWriter.write( '{}\t{}\t{}\n'.format(s, gBin._mccValues[i], contigsNames) )
-
-        outputWriter.close()
-
     @staticmethod
     def SaveCoreContigs(gBin):
 
