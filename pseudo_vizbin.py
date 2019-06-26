@@ -7,7 +7,7 @@
         2. Allows user to vary the weighting on coverage
         3. Does not prime the solution with a PCA
 '''
-import sys
+import sys, os
 import pandas as pd
 from optparse import OptionParser
 from sklearn import preprocessing
