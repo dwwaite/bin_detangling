@@ -1,14 +1,14 @@
 import sys, os
 import pandas as pd
 import numpy as np
-from collections import Counter
+from collections import Counter, OrderedDict
 from optparse import OptionParser
 from sklearn import preprocessing
 
 # My functions and classes
 from scripts.ThreadManager import ThreadManager
 from scripts.OptionValidator import ValidateFile, ValidateStringParameter, ValidateInteger
-from scripts.SequenceManipulation import IndexFastaFile
+#from scripts.SequenceManipulation import IndexFastaFile
 
 def main():
 
@@ -58,11 +58,26 @@ def main():
             kmerDataFrame = AppendCoverageTable(kmerDataFrame, options.coverage)
 
         completeDataFrame = NormaliseColumnValues(kmerDataFrame, options.normalise)
+
+        ''' Reorder the rows to match the input order '''
+        completeDataFrame = OrderRows(completeDataFrame, sequenceIndex)
         WriteOutputTable(inputFile, completeDataFrame, options.esomana)
 
 ###############################################################################
 
 #region Fasta and sequence handling
+
+def IndexFastaFile(fileName):
+
+    index = OrderedDict()
+
+    content = open(fileName, 'r').read().split('>')[1:]
+    for entry in content:
+
+        seqName, *seqContent = entry.split('\n')
+        index[seqName] = ''.join(seqContent)
+
+    return index
 
 def ComputeKmerTable(sequenceDict, nThreads, kSize):
 
@@ -182,6 +197,14 @@ def AppendCoverageTable(df, covFile):
     ''' https://pandas.pydata.org/pandas-docs/stable/user_guide/merging.html '''
     newFrame = df.merge(covFrame, how='inner', on='Contig')
     return newFrame
+
+def OrderRows(completeDataFrame, sequenceIndex):
+
+    ''' sequenceIndex is an OrderedDict, so extract the keys '''
+    df = completeDataFrame.set_index('Contig')
+    df = df.loc[ list(sequenceIndex.keys()) ]
+
+    return df.reset_index()
 
 def WriteOutputTable(inputFileName, df, esomanaFlag):
 
