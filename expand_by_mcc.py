@@ -75,33 +75,18 @@ def main():
     contam_table = ContaminationRecord.BuildContaminationFrame(contamination_instances)
     contam_counter = ContaminationRecord.CountContigFragments(options.esomTable)
 
-    ''' Recasting the binInstances list as a dict, so I can access specific bins at will '''
-    bin_instances = { bI.bin_name: bI for bI in bin_instances }
-    revisedBinInstances = ContaminationRecord.ResolveContaminationByAbundance(bin_instances, contam_table, contam_counter, options.biasThreshold)
+    ''' Recast the binInstances list as a dict, so we can access specific bins at will
+        While looping, also instantiate the core contig (ContigBase) data '''
+    bin_instance_dict = {}
+    for bI in bin_instances:
+         bin_instance_dict[ bI.bin_name ] = bI
+         bin_instance_dict[ bI.bin_name ].build_contig_base_set()
 
-    bin_precursors = { b: GenomeBin(b, e, n, o) for (b, e, n, o) in binPrecursors }
+    revisedBinInstances = ContaminationRecord.ResolveContaminationByAbundance(bin_instance_dict, contam_table, contam_counter, options.biasThreshold)
 
-    for k, v in revisedBinInstances.items():
+    ''' Resolve the final bin memberships into an output table '''
+    GenomeBin.CreateCoreTable(options.esomTable, revisedBinInstances.values() )
 
-        print(k)
-        print(v)
-        print(bin_precursors[k])
-        print( 'Original: {}'.format( len(bin_precursors[k].esom_table.ContigBase.unique() ) ) )
-        print( 'Refined: {}'.format(  len(v.esom_table.ContigBase.unique() ) ) )
-
-    #
-    # DEBUGGING - UP TO HERE
-    # 
-    """
-    #''' For each bin, write out the core contigs that are trusted at this stage. '''
-    #for binInstance in revisedBinInstances.values():
-    #    GenomeBin.SaveCoreContigs(binInstance)
-    ''' Write a table of the core contigs for each bin. '''
-
-
-    coreTable = GenomeBin.CreateCoreTable( revisedBinInstances.values() )
-    coreTable.to_csv( options.output + '.core_table.txt', sep='\t', index=False)
-    """
 ###############################################################################
 
 #region Bin refinement functions
@@ -109,7 +94,7 @@ def main():
 def RefineAndPlotBin(argTuple):
 
     '''
-        2019/03/11 - As a future point, it would make sense to rewrite ComputeCloudPurity as a static function of GenomeBin,
+        2019/03/11 - As a future point, it might make sense to rewrite ComputeCloudPurity as a static function of GenomeBin,
                      with specific functions for the steps within the MCC expansion.
                      This change would be cosmetic only, so remains TODO.
     '''

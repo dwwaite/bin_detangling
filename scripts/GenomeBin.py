@@ -29,13 +29,15 @@ class GenomeBin:
 
         last_contigfragment = max(idx for idx, val in enumerate( self.esom_table.BinID ) if val == self.bin_name) + 1
         self.esom_table = self.esom_table.head(last_contigfragment)
-        self.mcc_expectation = [ 1.0 if contig_bin == self.bin_name else -1.0 for contig_bin in self.esom_table.BinID ]
+        self.mcc_expectation = [ 1.0 if contig_bin == self.bin_name else 0.0 for contig_bin in self.esom_table.BinID ]
 
         ''' Add variables for internal use:
             iteration_scores creates a pd.DataFrame of numeric metrics
             slice, and contam_contigs is a NoSQL-like storage of complex objects '''
         self._iteration_scores = []
         self._slice_df_lookup = {}
+
+        self._contig_core = None
 
     #region Externally exposed functions
 
@@ -73,6 +75,36 @@ class GenomeBin:
 
         self.esom_table = self.esom_table[ self.esom_table.ContigBase != contigName ]
 
+    def build_contig_base_set(self):
+
+        df = self._slice_df_lookup[ self.top_key ]
+
+        contig_vector = df[ df.BinID == self.bin_name ].ContigBase
+        self._contig_core = set( contig_vector )
+
+    def add_contig_to_base_set(self, contig):
+
+        if self._contig_core:
+            self._contig_core.add(contig)
+
+    def remove_contig_from_base_set(self, contig):
+
+        if self._contig_core:
+
+            if contig in self._contig_core:
+
+                self._contig_core.remove(contig)
+
+    def count_contig_fragments(self, contig_name):
+
+        summary_dict = { contig: df[ df.BinID == self.bin_name ].shape[0] for contig, df in self.esom_table.groupby('ContigBase') }
+
+        if contig_name in summary_dict:
+            return summary_dict[contig_name]
+
+        else:
+            return 0
+
     #endregion
 
     #region Internal manipulation functions
@@ -96,9 +128,23 @@ class GenomeBin:
 
     def _compute_mcc(self, slice_df):
 
-        obs_vector = [-1.0] * len( self.mcc_expectation )
+        ''' Added some handling to suppress matthews_corrcoef warnings.
+            There is an edge case where if there are no false contigs in a bin,
+                the MCC encounters a divide by zero.
+            Where this is suspected, a result is faked.
+        '''
+        obs_vector = [0.0] * len( self.mcc_expectation )
         for i in range(0, slice_df.shape[0]): obs_vector[i] = 1.0
 
+        '''
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings('error')
+            try:
+                mcc = 
+            except:
+                return -1.0
+        '''
         return matthews_corrcoef(self.mcc_expectation, obs_vector)
 
     def _storeQualityValues(self, mcc, slice_key, area, perimeter, frame_slice):
@@ -164,21 +210,15 @@ class GenomeBin:
         df = pd.DataFrame( self._iteration_scores )
         return [ 4 * np.pi * area / perimeter ** 2 for perimeter, area in zip(df.Perimeter, df.Area) ]
 
-    """
     @property
-    def coreContigs(self):
+    def contig_core(self):
 
-        ''' If there is no optimal MCC, just return a fail '''
-        if self._bestSlice == -1: return None
-
-        ''' Otherwise, work out the list of contigs within the MCC-maximising zone '''
-        bestSliceValue = self.sliceSequence[ self._bestSlice ]
-        contigs = list (self.binPoints[ self.binPoints.SliceBand <= bestSliceValue ].ContigBase.unique() )
-        if contigs:
-            return contigs
+        if self._contig_core:
+            return list( self._contig_core )
+        
         else:
-            return None
-    """
+            return []
+
     #endregion
 
     #region Output functions
@@ -273,36 +313,24 @@ class GenomeBin:
 
         return return_tuples
 
-    """
     @staticmethod
-    def SaveCoreContigs(gBin):
-
-        if gBin.coreContigs:
-
-            outputWriter = open(gBin.output_path + '.contigs.txt', 'w')
-            contigString = '\n'.join(gBin.coreContigs) + '\n'
-            outputWriter.write(contigString)
-            outputWriter.close()
-
-        else:
-            print( 'No contigs remain in {}, skipping...'.format(gBin.bin_name) )
-
-    @staticmethod
-    def CreateCoreTable(gBinList):
+    def CreateCoreTable(esom_table_name, genome_bin_list):
 
         binMap = []
 
-        for gBin in gBinList:
-            if gBin.coreContigs:
+        for genome_bin in genome_bin_list:
+            if genome_bin.contig_core:
 
-                binMap.extend( [ { 'Bin': gBin.bin_name, 'ContigBase': c } for c in gBin.coreContigs ] )
+                binMap.extend( [ { 'Bin': genome_bin.bin_name, 'ContigBase': c } for c in genome_bin.contig_core ] )
 
             else:
-                print( 'No contigs remain in {}, skipping...'.format(gBin.bin_name) )
+                print( 'No contigs remain in {}, skipping...'.format(genome_bin.bin_name) )
                 continue
 
-        return pd.DataFrame(binMap)
-    """
+        ''' Set the output file '''
+        output_name = '{}.core_table.txt'.format( os.path.splitext(esom_table_name)[0] )
+        pd.DataFrame(binMap).to_csv(output_name, sep='\t', index=False)
+
     #endregion
 
 class ContaminationRecord():
@@ -330,23 +358,42 @@ class ContaminationRecord():
 
         for contig, fragment_df in contam_table.groupby('ContigBase'):
 
-            ''' Count the number of contamination fragments, then find the bin holding the most '''
-            contam_bin_dist = dict( Counter( fragment_df.ContaminationBin ) )
-            top_contam_bin = max(contam_bin_dist.items(), key=operator.itemgetter(1))[0]
+            ''' Create a list of all contamination bins. Flow control here:
 
-            ''' Create a list of all contamination bins
-                If a contamination bin passes the threshold, drop it from the original bin and assign it to the contamination one '''
+                1. If the original bin possesses most of the fragments, pass through, otherwise append it to the drop list
+                2. If the top 'contamination' bin has most of the fragments, pop it from the drop list and append the original bin into the contamination list
+                3. Drop the contig pieces from the contam_bins
+            '''
+
+            ''' Count the number of fragments in the original bin, and the total number of fragments '''
             current_bin = fragment_df.CurrentBin.values[0]
-            contam_bins = list( fragment_df.ContaminationBin.unique() )
+            fragments_in_main_bin = bin_instance_dict[ current_bin ].count_contig_fragments(contig)
+            total_fragments = contam_counter[ contig ]
 
-            if float( contam_bin_dist[top_contam_bin] ) / contam_counter[contig] >= bias_threshold:
+            ''' Count the number of contamination fragments in the bin holding the most '''
+            contam_bin_dict = dict( Counter( fragment_df.ContaminationBin ) )
+            top_contam_bin = max(contam_bin_dict.items(), key=operator.itemgetter(1))[0]
+    
+            bins_to_drop = list( fragment_df.ContaminationBin.unique() )
 
-                bin_instance_dict[ current_bin ].DropContig(contig)
-                contam_bins = contam_bins.remove(top_contam_bin)
+            if float( fragments_in_main_bin ) / total_fragments >= bias_threshold:
+
+                pass
+
+            elif float( contam_bin_dict[top_contam_bin] ) / total_fragments >= bias_threshold:
+
+                bins_to_drop.append( current_bin )
+                bins_to_drop.remove( top_contam_bin )
+
+                bin_instance_dict[ top_contam_bin ].add_contig_to_base_set( contig )
             
-            if contam_bins:
+            else:
 
-                for contam_bin in contam_bins:
-                    bin_instance_dict[ contam_bin ].DropContig(contig)
+                bins_to_drop.append( current_bin )
+
+            ''' Resolve the differences '''
+            for bin_name in bins_to_drop:
+
+                bin_instance_dict[ bin_name ].remove_contig_from_base_set(contig)
 
         return bin_instance_dict
