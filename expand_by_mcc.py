@@ -50,6 +50,7 @@ def main():
     #
     # Debugging - working without threading to keep errors on main process
     #
+    """
     from multiprocessing import Queue, Manager
     q = Manager().Queue()
     for bP in binPrecursors:
@@ -58,19 +59,18 @@ def main():
     _results = []
     while not q.empty():
         _results.append( q.get(True) )
+    """
 
     ''' Distribute the jobs over the threads provided '''
-    '''
     tManager = ThreadManager(options.threads, RefineAndPlotBin)
     
     funcArgList = [ (bP, tManager.queue) for bP in binPrecursors ]
     #tManager.ActivateMonitorPool(sleepTime=30, funcArgs=funcArgList, trackingString='Completed MCC growth for {} of {} bins.', totalJobSize=len(funcArgList))
     tManager.ActivateMonitorPool(sleepTime=10, funcArgs=funcArgList)
 
-    '''
     ''' Parse the results into the contamination record '''
-    #bin_instances, contamination_instance = ExtractQueuedResults(tManager.results)
-    bin_instances, contamination_instances = ExtractQueuedResults(_results)
+    bin_instances, contamination_instances = ExtractQueuedResults(tManager.results)
+    #bin_instances, contamination_instances = ExtractQueuedResults(_results)
 
     contam_table = ContaminationRecord.BuildContaminationFrame(contamination_instances)
     contam_counter = ContaminationRecord.CountContigFragments(options.esomTable)
