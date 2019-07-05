@@ -37,7 +37,7 @@ def main():
 
     ''' Distribute the jobs over the threads provided
         Because this mapped function stores results, not distributed jobs, I can't count the progress using the optional parameters of the ThreadManager '''
-    tManager = ThreadManager(options.threads, RefineAndPlotBin)
+    tManager = ThreadManager(options.threads, refine_and_plot_bin)
     
     funcArgList = [ (bP, fragment_counts, tManager.queue) for bP in bin_precursors ]
     tManager.ActivateMonitorPool(sleepTime=10, funcArgs=funcArgList)
@@ -82,32 +82,21 @@ def validate_input_data(bin_names, esom_table_name, number_of_slices, bias_thres
 
 #region Bin refinement functions
 
-def RefineAndPlotBin(argTuple):
+def refine_and_plot_bin(argTuple):
 
-    '''
-        2019/03/11 - As a future point, it might make sense to rewrite ComputeCloudPurity as a static function of GenomeBin,
-                     with specific functions for the steps within the MCC expansion.
-                     This change would be cosmetic only, so remains TODO.
-    '''
+    ''' Unpack the input tuple, then create a GenomeBin object '''
     (bin_name, esom_path, bias_threshold, number_of_slices, output_path), fragment_count_dict, q = argTuple
 
     bin_instance = GenomeBin(bin_name, esom_path, bias_threshold, number_of_slices, output_path)
 
+    ''' Perform the actual computation, first identifying the best slice of the bin that maximises inclusion and minimises contamination '''
     bin_instance.ComputeCloudPurity()
     bin_instance.ResolveUnstableContigs(fragment_count_dict, q)
 
+    ''' Create output/log files for the user '''
     bin_instance.PlotTrace()
     bin_instance.PlotScatter()
     bin_instance.SaveMccTable()
-
-def cast_bin_list_to_dict(bin_instance_list):
-
-    bin_instance_dict = {}
-    for bI in bin_instance_list:
-        bin_instance_dict[ bI.bin_name ] = bI
-        bin_instance_dict[ bI.bin_name ].build_contig_base_set()
-
-    return bin_instance_dict
 
 def count_all_fragments(esom_table_name):
 

@@ -26,25 +26,6 @@ class GenomeBin:
 
         self._core_contigs = None
 
-    def _prepare_esom_df(self, esom_path):
-
-        ''' Prepare the internal DataFrame of ESOM coordinates...
-            Import the ESOM table'''
-        self.esom_table = pd.read_csv(esom_path, sep='\t')
-
-        ''' Identify the centroid of the bin and measure the distance from each point to the centroid.
-            Finally, sort ascending '''
-        cenX, cenY = self.centroid
-
-        self.esom_table['Distance'] = [ self._calc_dist(cenX, cenY, x, y) for x, y in zip(self.esom_table.V1, self.esom_table.V2) ]
-        self.esom_table = self.esom_table.sort_values('Distance', ascending=True)
-
-        ''' Slice the table to the last binned contig
-            Reset the index '''
-        last_contigfragment = max(idx for idx, val in enumerate( self.esom_table.BinID ) if val == self.bin_name) + 1
-        self.esom_table = self.esom_table.head(last_contigfragment)
-        self.esom_table.reset_index(drop=True, inplace=True)
-
     #region Externally exposed functions
 
     def ComputeCloudPurity(self):
@@ -63,7 +44,7 @@ class GenomeBin:
             slice_area = q_hull.volume
             slice_perimeter = q_hull.area
 
-            self._storeQualityValues(slice_mcc, slice_key, slice_area, slice_perimeter, frame_slice )
+            self._store_quality_values(slice_mcc, slice_key, slice_area, slice_perimeter, frame_slice )
 
     def ResolveUnstableContigs(self, fragment_count_dict, qManager):
 
@@ -92,6 +73,25 @@ class GenomeBin:
 
     #region Internal manipulation functions
 
+    def _prepare_esom_df(self, esom_path):
+
+        ''' Prepare the internal DataFrame of ESOM coordinates...
+            Import the ESOM table'''
+        self.esom_table = pd.read_csv(esom_path, sep='\t')
+
+        ''' Identify the centroid of the bin and measure the distance from each point to the centroid.
+            Finally, sort ascending '''
+        cenX, cenY = self.centroid
+
+        self.esom_table['Distance'] = [ self._calc_dist(cenX, cenY, x, y) for x, y in zip(self.esom_table.V1, self.esom_table.V2) ]
+        self.esom_table = self.esom_table.sort_values('Distance', ascending=True)
+
+        ''' Slice the table to the last binned contig
+            Reset the index '''
+        last_contigfragment = max(idx for idx, val in enumerate( self.esom_table.BinID ) if val == self.bin_name) + 1
+        self.esom_table = self.esom_table.head(last_contigfragment)
+        self.esom_table.reset_index(drop=True, inplace=True)
+
     def _calc_dist(self, xCen, yCen, xPos, yPos):
         dX = np.array(xCen - xPos)
         dY = np.array(yCen - yPos)    
@@ -119,10 +119,11 @@ class GenomeBin:
 
     def _compute_mcc(self, slice_df):
 
-        ''' Added some handling to suppress matthews_corrcoef warnings.
-            There is an edge case where if there are no false contigs in a bin,
-                the MCC encounters a divide by zero.
-            Where this is suspected, a result is faked.
+        ''' There is an edge case where if there are no false contigs in a bin the MCC encounters a divide by zero.
+                Generally this doesn't matter, because it results in a vector of 0.0 for the MCC, and the larger slice is reported
+                for MCC ties.
+                That said, this should be revised in the future.
+
         '''
         obs_vector = [0.0] * len( self.mcc_expectation )
         for i in range(0, slice_df.shape[0]): obs_vector[i] = 1.0
@@ -138,17 +139,17 @@ class GenomeBin:
         '''
         return matthews_corrcoef(self.mcc_expectation, obs_vector)
 
-    def _storeQualityValues(self, mcc, slice_key, area, perimeter, frame_slice):
+    def _store_quality_values(self, mcc, slice_key, area, perimeter, frame_slice):
 
         self._iteration_scores.append( { 'MCC': mcc, 'Key': slice_key, 'Area': area, 'Perimeter': perimeter })
         self._slice_df_lookup[ slice_key ] = frame_slice
 
-    def slice_contigs_bin(self, slice_key):
+    def _slice_contigs_bin(self, slice_key):
 
         df = self._slice_df_lookup[ slice_key ]
         return df[ df.BinID == self.bin_name ]
 
-    def slice_contigs_nonbin(self, slice_key):
+    def _slice_contigs_nonbin(self, slice_key):
 
         df = self._slice_df_lookup[ slice_key ]
         return df[ df.BinID != self.bin_name ]
@@ -210,8 +211,8 @@ class GenomeBin:
         top_key = self.top_key
 
         ''' Find the contigs and contamination fragments inside the core '''
-        core_contigs = set( self.slice_contigs_bin(top_key).ContigName )
-        contam_contigs = set (self.slice_contigs_nonbin(top_key).ContigName )
+        core_contigs = set( self._slice_contigs_bin(top_key).ContigName )
+        contam_contigs = set (self._slice_contigs_nonbin(top_key).ContigName )
 
         ''' Find the contigs and contamination fragments outside the core '''
         outsider_contigs = set( self.bin_contigs ) - core_contigs
