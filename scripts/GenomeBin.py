@@ -65,7 +65,7 @@ class GenomeBin:
 
         top_key = self.top_key
         contam_contigs = self.slice_contigs_nonbin(top_key)
-
+ 
         for new_bin, contig_base, contig_fragment in zip(contam_contigs.BinID, contam_contigs.ContigBase, contam_contigs.ContigName):
 
             cRecord = ContaminationRecord(self.bin_name, new_bin, contig_fragment, contig_base)
@@ -97,13 +97,8 @@ class GenomeBin:
 
     def count_contig_fragments(self, contig_name):
 
-        summary_dict = { contig: df[ df.BinID == self.bin_name ].shape[0] for contig, df in self.esom_table.groupby('ContigBase') }
-
-        if contig_name in summary_dict:
-            return summary_dict[contig_name]
-
-        else:
-            return 0
+        df = self.esom_table[ self.esom_table.ContigBase == contig_name ]
+        return df.shape[0]
 
     #endregion
 
@@ -349,51 +344,63 @@ class ContaminationRecord():
         return pd.DataFrame(preframe_list)
 
     @staticmethod
-    def CountContigFragments(esom_table):
+    #def ResolveContaminationByAbundance(bin_instance_dict, contam_table, contam_counter, bias_threshold):
+    def ResolveContaminationByAbundance(arg_tuple):
 
-        return { contig: df.shape[0] for contig, df in pd.read_csv(esom_table, sep='\t').groupby('ContigBase') }
+        '''
+            Analyse a single contig and adds a 3-tuple of return information to the manager queue
+                1. Name of the contig
+                2. Bin to assign the contig to, None if no contig passes the threshold
+                3. Bins that the contig is seen in, that it must be removed from
+        '''
+        (contig, contig_fragments, bin_instance_dict, contam_table, bias_threshold, q) = arg_tuple
+        contam_df = contam_table[ contam_table.ContigBase == contig ]
 
-    @staticmethod
-    def ResolveContaminationByAbundance(bin_instance_dict, contam_table, contam_counter, bias_threshold):
+        ''' Count the number of fragments in the original bin, and the total number of fragments '''
+        current_bin = contam_df.CurrentBin.values[0]
+        fragments_in_main_bin = bin_instance_dict[ current_bin ].count_contig_fragments(contig)
 
-        for contig, fragment_df in contam_table.groupby('ContigBase'):
+        ''' Count the number of contamination fragments in the bin holding the most fragments '''
+        contam_bin_dict = dict( Counter( contam_df.ContaminationBin ) )
+        top_contam_bin = max(contam_bin_dict.items(), key=operator.itemgetter(1))[0]
 
-            ''' Create a list of all contamination bins. Flow control here:
+        bin_to_keep = None
+        bins_to_drop = list( contam_bin_dict.keys() )
 
-                1. If the original bin possesses most of the fragments, pass through, otherwise append it to the drop list
-                2. If the top 'contamination' bin has most of the fragments, pop it from the drop list and append the original bin into the contamination list
-                3. Drop the contig pieces from the contam_bins
-            '''
+        if contig == 'ContigA_88':
+            print(contig)
+            print(current_bin)
+            print(contam_bin_dict)
+            print( 'In: {}, Total: {}, Freq: {}'.format(fragments_in_main_bin, contig_fragments, bias_threshold) )
+            print(contam_df)
+            import sys; sys.exit()
 
-            ''' Count the number of fragments in the original bin, and the total number of fragments '''
-            current_bin = fragment_df.CurrentBin.values[0]
-            fragments_in_main_bin = bin_instance_dict[ current_bin ].count_contig_fragments(contig)
-            total_fragments = contam_counter[ contig ]
+        ''' Flow control here:
 
-            ''' Count the number of contamination fragments in the bin holding the most '''
-            contam_bin_dict = dict( Counter( fragment_df.ContaminationBin ) )
-            top_contam_bin = max(contam_bin_dict.items(), key=operator.itemgetter(1))[0]
-    
-            bins_to_drop = list( fragment_df.ContaminationBin.unique() )
+            1. If the original bin possesses most of the fragments, pass through, otherwise append it to the drop list
+            2. If the top 'contamination' bin has most of the fragments, pop it from the drop list and append the original bin into the contamination list
+            3. Drop the contig pieces from the contam_bins
+        '''
 
-            if float( fragments_in_main_bin ) / total_fragments >= bias_threshold:
+        if float( fragments_in_main_bin ) / contig_fragments >= bias_threshold:
 
-                pass
+            bin_to_keep = current_bin
+            print( 'Keep: {}'.format(bin_to_keep) )
 
-            elif float( contam_bin_dict[top_contam_bin] ) / total_fragments >= bias_threshold:
+        elif float( contam_bin_dict[top_contam_bin] ) / contig_fragments >= bias_threshold:
 
-                bins_to_drop.append( current_bin )
-                bins_to_drop.remove( top_contam_bin )
+            bin_to_keep = top_contam_bin
+            print( 'Contam: {}'.format(bin_to_keep) )
 
-                bin_instance_dict[ top_contam_bin ].add_contig_to_base_set( contig )
-            
-            else:
+            bins_to_drop.remove(top_contam_bin)
+            bins_to_drop.append(current_bin)
+        
+        else:
 
-                bins_to_drop.append( current_bin )
+            bins_to_drop.append( current_bin )
+        
+        ''' Store the results into the Manager.Queue'''
+        print(bins_to_drop)
+        print('')
 
-            ''' Resolve the differences '''
-            for bin_name in bins_to_drop:
-
-                bin_instance_dict[ bin_name ].remove_contig_from_base_set(contig)
-
-        return bin_instance_dict
+        q.put( (contig, bin_to_keep, bins_to_drop) )
