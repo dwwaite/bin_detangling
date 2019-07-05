@@ -1,5 +1,4 @@
-import os, math, uuid, operator
-from collections import Counter
+import os, uuid, operator
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,27 +7,15 @@ from sklearn.metrics import matthews_corrcoef
 
 class GenomeBin:
 
-    def __init__(self, bin_name, esom_path, number_of_slices, output_path):
+    def __init__(self, bin_name, esom_path, bias_threshold, number_of_slices, output_path):
 
         self.bin_name = bin_name
         self.output_path = output_path
-        self.number_of_slices = number_of_slices
+        self.bias_threshold = bias_threshold
+        self.number_of_slices = number_of_slices 
 
-        ''' Prepare the internal DataFrame of ESOM coordinates.
+        self._prepare_esom_df(esom_path)
         
-            1. Import the ESOM table
-            2. Identify the centroid of the bin
-            3. Measure the distance from each point to the centroid, then sort ascending
-            4. Slice the table to the last binned contig
-        '''
-        self.esom_table = pd.read_csv(esom_path, sep='\t')
-
-        cenX, cenY = self.centroid
-        self.esom_table['Distance'] = [ self._calcDist(cenX, cenY, x, y) for x, y in zip(self.esom_table.V1, self.esom_table.V2) ]
-        self.esom_table = self.esom_table.sort_values('Distance', ascending=True)
-
-        last_contigfragment = max(idx for idx, val in enumerate( self.esom_table.BinID ) if val == self.bin_name) + 1
-        self.esom_table = self.esom_table.head(last_contigfragment)
         self.mcc_expectation = [ 1.0 if contig_bin == self.bin_name else 0.0 for contig_bin in self.esom_table.BinID ]
 
         ''' Add variables for internal use:
@@ -37,13 +24,32 @@ class GenomeBin:
         self._iteration_scores = []
         self._slice_df_lookup = {}
 
-        self._contig_core = None
+        self._core_contigs = None
+
+    def _prepare_esom_df(self, esom_path):
+
+        ''' Prepare the internal DataFrame of ESOM coordinates...
+            Import the ESOM table'''
+        self.esom_table = pd.read_csv(esom_path, sep='\t')
+
+        ''' Identify the centroid of the bin and measure the distance from each point to the centroid.
+            Finally, sort ascending '''
+        cenX, cenY = self.centroid
+
+        self.esom_table['Distance'] = [ self._calc_dist(cenX, cenY, x, y) for x, y in zip(self.esom_table.V1, self.esom_table.V2) ]
+        self.esom_table = self.esom_table.sort_values('Distance', ascending=True)
+
+        ''' Slice the table to the last binned contig
+            Reset the index '''
+        last_contigfragment = max(idx for idx, val in enumerate( self.esom_table.BinID ) if val == self.bin_name) + 1
+        self.esom_table = self.esom_table.head(last_contigfragment)
+        self.esom_table.reset_index(drop=True, inplace=True)
 
     #region Externally exposed functions
 
-    def ComputeCloudPurity(self, qManager):
+    def ComputeCloudPurity(self):
 
-        for frame_slice in self._getNextSlice():
+        for frame_slice in self._get_next_slice():
 
             ''' Create a UUID for storing contig records '''
             slice_key = uuid.uuid4()          
@@ -59,67 +65,57 @@ class GenomeBin:
 
             self._storeQualityValues(slice_mcc, slice_key, slice_area, slice_perimeter, frame_slice )
 
-        ''' Have two data types to store in the qManager - the modified bin object, and contamination records
-            Store a tuple, with the first value as a binary switch for bin vs contam '''        
-        qManager.put( (True, self) )
+    def ResolveUnstableContigs(self, fragment_count_dict, qManager):
 
-        top_key = self.top_key
-        contam_contigs = self.slice_contigs_nonbin(top_key)
- 
-        for new_bin, contig_base, contig_fragment in zip(contam_contigs.BinID, contam_contigs.ContigBase, contam_contigs.ContigName):
+        ''' Find the key that corresponds to the top MCC, then cast out a list of the ContigBase names within this '''
+        top_df = self._slice_df_lookup[ self.top_key ]
 
-            cRecord = ContaminationRecord(self.bin_name, new_bin, contig_fragment, contig_base)
-            qManager.put( (False, cRecord) )
+        top_contigs = top_df[ top_df.BinID == self.bin_name ].ContigBase.unique()
 
-    def DropContig(self, contigName):
+        ''' For each fo these contigs, remove it if it does not pass the bias_threshold '''
+        core_contigs = set(top_contigs)
+        for contig in top_contigs:
 
-        self.esom_table = self.esom_table[ self.esom_table.ContigBase != contigName ]
+            contig_fragment_bin_dist = top_df[ top_df.ContigBase == contig ].BinID.value_counts()
 
-    def build_contig_base_set(self):
+            self_fragments = contig_fragment_bin_dist[ self.bin_name ]
+            total_fragments = fragment_count_dict[contig]
 
-        df = self._slice_df_lookup[ self.top_key ]
+            if float(self_fragments) / total_fragments < self.bias_threshold:
+                core_contigs.remove(contig)
 
-        contig_vector = df[ df.BinID == self.bin_name ].ContigBase
-        self._contig_core = set( contig_vector )
-
-    def add_contig_to_base_set(self, contig):
-
-        if self._contig_core:
-            self._contig_core.add(contig)
-
-    def remove_contig_from_base_set(self, contig):
-
-        if self._contig_core:
-
-            if contig in self._contig_core:
-
-                self._contig_core.remove(contig)
-
-    def count_contig_fragments(self, contig_name):
-
-        df = self.esom_table[ self.esom_table.ContigBase == contig_name ]
-        return df.shape[0]
+        ''' Store dicts of bin/contig, for return to the main process '''
+        for c in core_contigs:
+            qManager.put( { 'Bin': self.bin_name, 'Contig': c } )
 
     #endregion
 
     #region Internal manipulation functions
 
-    def _calcDist(self, xCen, yCen, xPos, yPos):
+    def _calc_dist(self, xCen, yCen, xPos, yPos):
         dX = np.array(xCen - xPos)
         dY = np.array(yCen - yPos)    
         return np.sqrt( dX ** 2 + dY ** 2 )
 
-    def _getNextSlice(self):
+    def _get_next_slice(self):
 
-        '''
-            This function returns slices along the full bin space divide amongst all points within it.
-            Alternately, could map the values across only the bin contigs?
-        '''
-        n_contigs = self.esom_table.shape[0]
-        for x in range(1, self.number_of_slices+1):
+        ''' Pull the indices for the contig fragments in the bin '''
+        index_list = list( self.esom_table[ self.esom_table.BinID == self.bin_name ].index )
+        n_contigs = len(index_list)
 
-            hits = np.sin( x / self.number_of_slices * np.pi/2 ) * n_contigs
-            yield self.esom_table.head( int(hits) )
+        ''' Divide the index list into N slices, following a sine function '''
+        for x in range(1, self.number_of_slices + 1):
+
+            slice_index = np.sin( x / self.number_of_slices * np.pi/2 ) * n_contigs
+            slice_index = int(slice_index)
+            curr_slice = index_list[ slice_index ]
+
+            yield self.esom_table.iloc[ 0:curr_slice, ]
+
+            ''' Break the loop if we've hit the end of the curve early.
+                This can happen for the last entry due to int rounding of the index '''
+            if slice_index + 1 == n_contigs:
+                break
 
     def _compute_mcc(self, slice_df):
 
@@ -136,9 +132,9 @@ class GenomeBin:
         with warnings.catch_warnings():
             warnings.filterwarnings('error')
             try:
-                mcc = 
+                mcc = ...
             except:
-                return -1.0
+                return ...
         '''
         return matthews_corrcoef(self.mcc_expectation, obs_vector)
 
@@ -204,15 +200,6 @@ class GenomeBin:
         '''
         df = pd.DataFrame( self._iteration_scores )
         return [ 4 * np.pi * area / perimeter ** 2 for perimeter, area in zip(df.Perimeter, df.Area) ]
-
-    @property
-    def contig_core(self):
-
-        if self._contig_core:
-            return list( self._contig_core )
-        
-        else:
-            return []
 
     #endregion
 
@@ -291,7 +278,7 @@ class GenomeBin:
     #region Static functions
 
     @staticmethod
-    def ParseStartingVariables(esom_table_path, number_of_slices, bin_names, output_prefix = None):
+    def ParseStartingVariables(bin_names, esom_table_path, number_of_slices, bias_threshold, output_prefix = None):
 
         ''' Just a QoL method for pre-formating the input data for constructing GenomeBin objects.
             Allows for a nice way to terminate the script early if there are path issues, before getting to the actual grunt work '''
@@ -304,103 +291,18 @@ class GenomeBin:
             if bin_name in esom_table_bins:
 
                 outputPath = output_prefix + bin_name + '.refined' if output_prefix else bin_name + '.refined'
-                return_tuples.append( (bin_name, esom_table_path, number_of_slices, outputPath) )
+                return_tuples.append( (bin_name, esom_table_path, bias_threshold, number_of_slices, outputPath) )
 
         return return_tuples
 
     @staticmethod
-    def CreateCoreTable(esom_table_name, genome_bin_list):
-
-        binMap = []
-
-        for genome_bin in genome_bin_list:
-            if genome_bin.contig_core:
-
-                binMap.extend( [ { 'Bin': genome_bin.bin_name, 'ContigBase': c } for c in genome_bin.contig_core ] )
-
-            else:
-                print( 'No contigs remain in {}, skipping...'.format(genome_bin.bin_name) )
-                continue
+    def CreateCoreTable(esom_table_name, results_buffer_list):
 
         ''' Set the output file '''
         output_name = '{}.core_table.txt'.format( os.path.splitext(esom_table_name)[0] )
-        pd.DataFrame(binMap).to_csv(output_name, sep='\t', index=False)
+
+        ''' Save it '''
+        bin_map = pd.DataFrame(results_buffer_list)
+        bin_map.to_csv(output_name, sep='\t', index=False)
 
     #endregion
-
-class ContaminationRecord():
-
-    def __init__(self, current_bin, new_bin, contig_fragment, contig_base):
-
-        self.current_bin = current_bin
-        self.new_bin = new_bin
-        self.contig_fragment = contig_fragment
-        self.contig_base = contig_base
-
-    @staticmethod
-    def BuildContaminationFrame(contam_record_list):
-
-        preframe_list = [ { 'ContigBase': cr.contig_base, 'CurrentBin': cr.current_bin, 'ContigFragment': cr.contig_fragment, 'ContaminationBin': cr.new_bin } for cr in contam_record_list ]
-        return pd.DataFrame(preframe_list)
-
-    @staticmethod
-    #def ResolveContaminationByAbundance(bin_instance_dict, contam_table, contam_counter, bias_threshold):
-    def ResolveContaminationByAbundance(arg_tuple):
-
-        '''
-            Analyse a single contig and adds a 3-tuple of return information to the manager queue
-                1. Name of the contig
-                2. Bin to assign the contig to, None if no contig passes the threshold
-                3. Bins that the contig is seen in, that it must be removed from
-        '''
-        (contig, contig_fragments, bin_instance_dict, contam_table, bias_threshold, q) = arg_tuple
-        contam_df = contam_table[ contam_table.ContigBase == contig ]
-
-        ''' Count the number of fragments in the original bin, and the total number of fragments '''
-        current_bin = contam_df.CurrentBin.values[0]
-        fragments_in_main_bin = bin_instance_dict[ current_bin ].count_contig_fragments(contig)
-
-        ''' Count the number of contamination fragments in the bin holding the most fragments '''
-        contam_bin_dict = dict( Counter( contam_df.ContaminationBin ) )
-        top_contam_bin = max(contam_bin_dict.items(), key=operator.itemgetter(1))[0]
-
-        bin_to_keep = None
-        bins_to_drop = list( contam_bin_dict.keys() )
-
-        if contig == 'ContigA_88':
-            print(contig)
-            print(current_bin)
-            print(contam_bin_dict)
-            print( 'In: {}, Total: {}, Freq: {}'.format(fragments_in_main_bin, contig_fragments, bias_threshold) )
-            print(contam_df)
-            import sys; sys.exit()
-
-        ''' Flow control here:
-
-            1. If the original bin possesses most of the fragments, pass through, otherwise append it to the drop list
-            2. If the top 'contamination' bin has most of the fragments, pop it from the drop list and append the original bin into the contamination list
-            3. Drop the contig pieces from the contam_bins
-        '''
-
-        if float( fragments_in_main_bin ) / contig_fragments >= bias_threshold:
-
-            bin_to_keep = current_bin
-            print( 'Keep: {}'.format(bin_to_keep) )
-
-        elif float( contam_bin_dict[top_contam_bin] ) / contig_fragments >= bias_threshold:
-
-            bin_to_keep = top_contam_bin
-            print( 'Contam: {}'.format(bin_to_keep) )
-
-            bins_to_drop.remove(top_contam_bin)
-            bins_to_drop.append(current_bin)
-        
-        else:
-
-            bins_to_drop.append( current_bin )
-        
-        ''' Store the results into the Manager.Queue'''
-        print(bins_to_drop)
-        print('')
-
-        q.put( (contig, bin_to_keep, bins_to_drop) )
