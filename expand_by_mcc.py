@@ -2,7 +2,6 @@
     A refactored version of the original script, so make use of multithreading
 
     Debug line
-    cd C:/Users/dwait/bin_detangling
     python expand_by_mcc.py -e tests/mock.table.txt -o tests/debug -
 '''
 
