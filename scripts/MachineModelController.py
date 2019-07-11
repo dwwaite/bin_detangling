@@ -155,12 +155,12 @@ class MachineController():
 
     # region Model training
 
-    def TrainModels(self, numSplits, trainingData, trainingLabels, seed = None):
+    def TrainModels(self, num_splits, esom_core, seed = None):
 
         classificationAccuracyList = []
 
         splitIteration = 1
-        for dataTrain, labelTrain, dataValidate, labelValidate in MachineController.YieldPermutations(numSplits, trainingData, trainingLabels, seed):
+        for dataTrain, labelTrain, dataValidate, labelValidate in MachineController.YieldPermutations(num_splits, esom_core, seed):
 
                 for modelType, modelBase in self._modelBase.items():
 
@@ -173,16 +173,13 @@ class MachineController():
                         modelCalls, modelConf = self._classifyData(modelType, currModel, dataValidate)
                         modelMask = [ x == y for x, y in zip(labelValidate, modelCalls) ]
 
-                        ''' If all matches are correct, values are 1.0 by definition '''
+                        ''' If all matches are correct, values are 1.0 by definition.
+                            This is a workaround to the issues that crop up occassionally for MCC when denominator values are 0, creating a divide by zero error '''
                         if len( set(modelMask) ) == 1 and modelMask[0]:
 
                             classificationAccuracyList.append( { 'Model': modelType, 'Iteration': splitIteration, 'F1': 1.0, 'MCC': 1.0, 'ROC_AUC':  1.0 } )
 
                         else:
-
-                            '''
-                                Getting conversion errors here. To check...
-                            '''
                             
                             classificationAccuracyList.append( { 'Model': modelType,
                                                                 'Iteration': splitIteration,
@@ -291,7 +288,7 @@ class MachineController():
 
             ''' Store an index of the row being classified, so the results are stored in the correct order '''
             tManager = ThreadManager(self._threadCount, self._calcConfidenceRf)
-            funcArgList = [ (_model, hitMap, i, _data.iloc[i,:], tManager.queue) for i in range(nEntries) ]
+            funcArgList = [ (_model, hitMap, i, _data[i,], tManager.queue) for i in range(nEntries) ]
 
             tManager.ActivateMonitorPool(sleepTime=1, funcArgs=funcArgList)
 
@@ -302,7 +299,7 @@ class MachineController():
 
         else:
             for i in range(nEntries):
-                callResults[i], confResults[i] = self._calcConfidence(_model, hitMap, _data.iloc[i,:])
+                callResults[i], confResults[i] = self._calcConfidence(_model, hitMap, _data[i,])
                 # Mod: Return the distribution of confidences
                 #confResults[i] = self._calcConfidence(_model, hitMap, _data.iloc[i,:])
 
@@ -316,7 +313,7 @@ class MachineController():
 
         ''' Create a list of the individual calls for each decision tree '''
         nTrees = len(_rfModel.estimators_)
-        calls = [ _rfModel.estimators_[i].predict( _dataRow.values.reshape(1, -1) )[0] for i in range(nTrees) ]
+        calls = [ _rfModel.estimators_[i].predict( _dataRow.reshape(1, -1) )[0] for i in range(nTrees) ]
 
         ''' Reshape the data as a dict of occurences, then return the top value and confidence '''
         callsDict = dict( Counter( [ _hitMap[c] for c in calls ] ) )
@@ -329,7 +326,7 @@ class MachineController():
 
     def _calcConfidence(self, _model, _hitMap, _dataRow):
 
-        pred = _model.predict_proba( _dataRow.values.reshape(1, -1) )[0]
+        pred = _model.predict_proba( _dataRow.reshape(1, -1) )[0]
         
         ''' Reshape the data as a dict of probabilities, then return the top value and confidence '''
         callsDict = { c: p for c, p in zip(_model.classes_, pred) }
@@ -346,18 +343,27 @@ class MachineController():
     # region Static functions
 
     @staticmethod
-    def YieldPermutations(num_splits, trainingData, trainingLabels, seed = None):
+    def YieldPermutations(num_splits, esom_obj, seed = None):
 
         if seed:
             spliterObj = StratifiedShuffleSplit(n_splits=num_splits, test_size=0.5, random_state=seed)
 
         else:
             spliterObj = StratifiedShuffleSplit(n_splits=num_splits, test_size=0.5)
-        
-        for tr, te in spliterObj.split(trainingData, trainingLabels):
-            dTrain, dValidate = trainingData.iloc[ tr, : ], trainingData.iloc[ te, : ]
-            lTrain = [ list(trainingLabels)[x] for x in tr ]
-            lValidate = [ list(trainingLabels)[x] for x in te ]
+
+        ''' Textbox implementation of the SSS function, so not really commented here. Basically, split the data into:
+                1. dTrain = features for training data
+                2. lTrain = labels matching dTrain rows to group (bin)
+                3. dValidate = features not used in model training, for testing model accuracy
+                4. lValidate = labels of the expected classification for dValidate '''        
+        for tr, te in spliterObj.split(esom_obj.ord_values, esom_obj.original_bin):
+
+            dTrain = esom_obj.ord_values[ tr, ]
+            lTrain = [ list(esom_obj.original_bin)[x] for x in tr ]
+
+            dValidate = esom_obj.ord_values[ te, ]            
+            lValidate = [ list(esom_obj.original_bin)[x] for x in te ]
+
             yield dTrain, lTrain, dValidate, lValidate
 
     @staticmethod

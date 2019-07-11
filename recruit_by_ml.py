@@ -1,6 +1,6 @@
 '''
     Rapid/debug run - drop RF for increased speed
-    python recruit_by_ml.py -e tests/mock.table.txt --evaluate-only tests/mock.table.core_table.txt
+    python recruit_by_ml.py -e tests/mock.table.txt -m NN,SVML,SVMP,SVMR --evaluate-only tests/mock.table.core_table.txt
     python recruit_by_ml.py -e tests/mock.table.txt --reload -m RF,SVML,SVMP,SVMR tests/mock.table.core_table.txt
 '''
 
@@ -29,7 +29,6 @@ def main():
 
     # Basic options
     parser.add_option('-e', '--esom-table', help='A table produced by the vizbin_files_to_table.py script', dest='esomTable')
-    parser.add_option('-c', '--coverage-table', help='A table of per-contig coverage values to use as features in classification (Default: None)', dest='coverageTable', default=None)
     parser.add_option('-o', '--output', help='An output prefix for all generated files (Default: Inferred from ESOM table)', dest='output', default=None)
 
     # Machine-learning parameters - general
@@ -59,8 +58,6 @@ def main():
 
     '''
     options.esomTable = ValidateFile(inFile=options.esomTable, fileTypeWarning='ESOM table', behaviour='abort')
-    if options.coverageTable:
-        options.coverageTable = ValidateFile(inFile=options.coverageTable, fileTypeWarning='coverage table', behaviour='skip')
 
     outputFileStub = options.output if options.output else os.path.splitext(options.esomTable)[0]
 
@@ -72,11 +69,11 @@ def main():
             4. Bin membership list - A list of the bins that each contig is found in. Order matches that of outputs 1 and 2.
     '''
     userTable = pd.read_csv(options.esomTable, sep='\t')
-    ValidateDataFrameColumns(df=userTable, columnsRequired=['BinID', 'ContigName', 'ContigBase'])
+    ValidateDataFrameColumns(df=userTable, columnsRequired=['V1', 'V2', 'BinID', 'ContigName', 'ContigBase'])
     coreContigTable = pd.read_csv(coreContigFile, sep='\t')
-    ValidateDataFrameColumns(df=coreContigTable, columnsRequired=['Bin', 'ContigBase'])
+    ValidateDataFrameColumns(df=coreContigTable, columnsRequired=['Bin', 'Contig'])
    
-    esomCore, esomCloud = ParseEsomForTraining(userTable, options.coverageTable, options.use_bin_membership, coreContigTable)
+    esomCore, esomCloud = ParseEsomForTraining(userTable, options.use_bin_membership, coreContigTable)
     #_peakIntoObj(esomCore)
     #_peakIntoObj(esomCloud)
     #sys.exit()
@@ -86,7 +83,7 @@ def main():
     options.threads = ValidateInteger(userChoice=options.threads, parameterNameWarning='threads', behaviour='default', defaultValue=1)
     options.cross_validate = ValidateInteger(userChoice=options.cross_validate, parameterNameWarning='number of training splits', behaviour='default', defaultValue=10)
     options.rf_trees = ValidateInteger(userChoice=options.rf_trees, parameterNameWarning='decision trees', behaviour='default', defaultValue=1000)
-    options.nn_nodes = ExtractAndVerifyLayerChoices(options.nn_nodes, esomCore.ordValues.columns, coreContigTable)
+    options.nn_nodes = ExtractAndVerifyLayerChoices(options.nn_nodes, esomCore)
 
     '''
 
@@ -113,7 +110,7 @@ def main():
     ''' Step 2. '''
 
     if not options.reload:
-        machineModelController.TrainModels(options.cross_validate, esomCore.ordValues, esomCore.coreBinList, options.seed)
+        machineModelController.TrainModels(options.cross_validate, esomCore, options.seed)
 
     ''' Step 3. '''
     if not options.reload:
@@ -123,16 +120,19 @@ def main():
 
         if options.evaluate_only: sys.exit()
 
+    # UP TO HERE
+    #   DOWNSTREAM CODE *SHOULD* BE SYNCED WITH CHANGES TO esomCore, but probably not esomCloud
+
     ''' Step 4. '''
-    esomConfidence = ParseEsomForErrorProfiling(userTable, options.coverageTable, options.use_bin_membership, coreContigTable)
+    #esomConfidence = ParseEsomForErrorProfiling(userTable, options.use_bin_membership, coreContigTable)
     #_peakIntoObj(esomConfidence)
     #sys.exit()
 
-    confidenceClassify = machineModelController.ClassifyByEnsemble(esomConfidence.ordValues, esomConfidence.contigList)
-    confidenceCritical = ProduceConfidenceIntervals(esomConfidence, confidenceClassify, outputFileStub)
+    #confidenceClassify = machineModelController.ClassifyByEnsemble(esomConfidence.ordValues, esomConfidence.contigList)
+    #confidenceCritical = ProduceConfidenceIntervals(esomConfidence, confidenceClassify, outputFileStub)
 
-    ensembleResult = machineModelController.ClassifyByEnsemble(esomCloud.ordValues, esomCloud.contigList)
-    ReportFinalAssignments(ensembleResult, confidenceCritical, outputFileStub)
+    #ensembleResult = machineModelController.ClassifyByEnsemble(esomCloud.ordValues, esomCloud.contigList)
+    #ReportFinalAssignments(ensembleResult, confidenceCritical, outputFileStub)
 
 ###############################################################################
 
@@ -181,13 +181,12 @@ def ExtractAndVerifyModelChoices(modelString):
         print('No valid models selected. Aborting...')
         sys.exit()
 
-def ExtractAndVerifyLayerChoices(neuronString, featureList, coreContigTable):
+def ExtractAndVerifyLayerChoices(neuronString, esomCore):
 
     '''
         Input:
             1. A user-specified list of neurons to use in the input, hidden, and output layer of neural network
-            2. The list of all features in the esomTable DataFrame
-            3. A DataFrame with the columns Bin, ContigBase
+            2. The esomCore namedtuple, containing variables encoding the number of features and classification options
 
         Action:
             1. Wrapped in flow control, cases are:
@@ -224,10 +223,55 @@ def ExtractAndVerifyLayerChoices(neuronString, featureList, coreContigTable):
             sys.exit()
 
     ''' Otherwise, infer from the data '''
-    iLayer = len(featureList) + 1
-    oLayer = len( coreContigTable.Bin.unique() )
-    hLayer = (iLayer + oLayer) / 2
-    return iLayer, int(hLayer), oLayer
+    input_layer = esomCore.ord_values.shape[1]
+    output_layer = len( esomCore.original_bin.unique() )
+    hidden_layer = (input_layer + output_layer) / 2
+
+    return input_layer, int(hidden_layer), output_layer
+
+# endregion
+
+# region User data import
+
+def ParseEsomForTraining(esomTable, binMembershipFlag, coreContigTable):
+
+    '''
+        Input:
+            1. A DataFrame with the following columns:
+               1.1 V* - Coordinates from ESOM
+               1.2 BinID - The text name of the bin from which the contig originally derives
+               1.3 ContigName - The name of the contig fragment. Takes the form ContigBase|<i>
+               1.4 ContigBase - The name of the original contig
+            2. Parameter determining whether or not the original bin information should be included in the training table
+            3. A DataFrame with the columns Bin, Contig (equivalent to ContigBase in the esomTable)
+
+        Action:
+            1. Perform a left join appending the data from coreContigTable onto the esomTable. Non-core contigs are marked with '-'
+            2. Parse these results into the DataFrame preTrainingFrame, with the columns:
+                1.1 V* - New ~coordinates from ESOM
+                1.2 Contig - The value of ContigBase used to group the fragments
+                1.3 OriginalBin - The value of BinID
+            3. If bin membership is request for training, these are appended through the _appendBinMembership() function
+            4. esomTable is split into the eObjs esomCore and esomCloud
+                These capture which contigs used for training/validation (esomCore) and classification (esomCloud)
+
+        Result:
+            1. Two DataFrames are returned to main(), split according to whether they are the core of unbinned contigs
+
+    '''
+
+    join_df = pd.merge(esomTable, coreContigTable, how='left', left_on='ContigBase', right_on='Contig', left_index=False, right_index=False).fillna('-')
+    join_df.drop('Contig', axis=1, inplace=True)
+
+    ''' If required, encode bin identity as new factors '''
+    if binMembershipFlag:
+        join_df = _appendBinMembership(join_df)
+
+    ''' Pop off the text columns and create namedtuples carrying the information needed for ML processing '''
+    esomCore = _bindToTableObj( join_df[ join_df.Bin != '-' ] )
+    esomCloud = _bindToTableObj( join_df[ join_df.Bin == '-' ] )
+
+    return esomCore, esomCloud
 
 def _peakIntoObj(o):
 
@@ -238,117 +282,40 @@ def _peakIntoObj(o):
             1. An eObj tuple with the variables ordValues, contigList, coreBinList, and originalBinList
 
         Action:
-            1. Print the first 5 values of each variable within the eObj
+            1. Print the first 5 values of each vector within the eObj
 
         Result:
             1. No values are returned to calling function
 
     '''
-    print('\n\nordValues (first 5)'); print(o.ordValues.head(5))
-    print('\ncontigList (first 5)'); print(o.contigList[0:5] )
-    print('\ncoreBinList (set)'); print( set(o.coreBinList) )
-    print('\noriginalBinList (set)'); print( set(o.originalBinList) )
-
-# endregion
-
-# region User data import
-
-def ParseEsomForTraining(esomTable, coverageTablePath, binMembershipFlag, coreContigTable):
-
-    '''
-        Input:
-            1. A DataFrame with the following columns:
-               1.1 V* - Coordinates from ESOM
-               1.2 BinID - The text name of the bin from which the contig originally derives
-               1.3 ContigName - The name of the contig fragment. Takes the form ContigBase|<i>
-               1.4 ContigBase - The name of the original contig
-            2. File path to a coverage table (optional)
-            3. Parameter determining whether or not the original bin information should be included in the training table
-            4. A DataFrame with the columns Bin, ContigBase
-
-        Action:
-            1. For each contig fragment in esomTable, take the average (median) V1 and V2 positions and use these as the coordinates the the full contig
-            2. Parse these results into the DataFrame preTrainingFrame, with the columns:
-                1.1 V* - New ~coordinates from ESOM
-                1.2 Contig - The value of ContigBase used to group the fragments
-                1.3 OriginalBin - The value of BinID
-            3. If coverage values are provided, these are appended through the _appendCoverageTable() function, then scaled with the _scaleColumns() function
-            4. If bin membership is request for training, these are appended through the _appendBinMembership() function
-            5. The column CoreBin is appended to preTrainingFrame, via the _binMembershipGenerator() function
-            6. preTrainingFrame is split into the eObj variables esomCore and esomCloud
-                These objects capture which contigs used for training/validation (esomCore) and classification (esomCloud)
-
-        Result:
-            1. Two eObj tuples are returned to main(). These each have the values
-                1.1 ordValues - The numeric value matrix to be used in training - V* and Coverage* columns
-                1.2 contigList - The names of the contigs in ordValues
-                1.3 coreBinList - If contig is a core contig, which bin it belonged to
-                1.4 originalBinList - The original assignment of the contig
-
-    '''
-
-    featureList = _identifyFeatureColumns( esomTable.columns )
-
-    preTrainingList = []
-    for c, df in esomTable.groupby('ContigBase'):
-
-        dataRecord = { v: np.median(df[v]) for v in featureList }
-        dataRecord['Contig'] = c
-        dataRecord['OriginalBin'] = list(df.BinID)[0]
-
-        preTrainingList.append( dataRecord )
-
-    preTrainingFrame = pd.DataFrame(preTrainingList)
-
-    ''' If required, append coverage information and normalise it.
-        Normalisation is not performed if model training is done of ordination values alone '''
-    if coverageTablePath:
-        preTrainingFrame, coverageFeatures = _appendCoverageTable(preTrainingFrame, coverageTablePath, 'Contig')
-        preTrainingFrame = _scaleColumns(preTrainingFrame, featureList)
-        preTrainingFrame = _scaleColumns(preTrainingFrame, coverageFeatures)
-
-    ''' If required, encode bin identity as new factors '''
-    if binMembershipFlag:
-        preTrainingFrame, _ = _appendBinMembership(preTrainingFrame, 'OriginalBin')
-
-    '''
-        Update the bin informating.
-             For core contigs, assign bin identity
-             For other contigs, assign placeholder value
-        Finally, pop off the text columns
-    '''
-
-    preTrainingFrame['CoreBin'] = [ b for b in _binMembershipGenerator(preTrainingFrame.Contig, coreContigTable) ]
-
-    validBins = list( coreContigTable.Bin.unique() )
-    esomCore = _bindToTableObj( preTrainingFrame[ preTrainingFrame.CoreBin != '-' ] )
-    esomCloud = _bindToTableObj( preTrainingFrame[ (preTrainingFrame.CoreBin == '-') &
-                                                   (preTrainingFrame.OriginalBin.isin(validBins)) ] )
-
-    return esomCore, esomCloud
+    print('\n\nordValues'); print(o.ord_values)
+    print('\ncontig_base'); print(o.contig_base[0:5] )
+    print('\ncontig_fragments'); print( o.contig_fragments[0:5] )
+    print('\noriginal_bin (set)'); print( set(o.original_bin) )
 
 def _bindToTableObj(dfSlice):
 
     '''
         Input:
-            1. A DataFrame with the columns V*, Coverage* (optional), Contig, OriginalBin, and CoreBin
-    
+            1. A DataFrame with the columns V*, ContigBase, ContigName, BinID, Bin, and optionally bin dummies        
         Action:
             1. Splits the DataFrame into a new DataFrame retaining only numeric values needed for modeling
             2. Bind the text columns to new variables in the object
-
         Result:
             1. An eObj is returned to the calling function ParseEsomForTraining() or ParseEsomForErrorProfiling()
     '''
 
-    eObj = namedtuple('eObj', 'ordValues contigList coreBinList originalBinList')
-    ctL = dfSlice.pop('Contig')
-    crL = dfSlice.pop('CoreBin')
-    obL = dfSlice.pop('OriginalBin')
+    eObj = namedtuple('eObj', 'ord_values contig_base contig_fragments original_bin')
 
-    return eObj(ordValues=dfSlice, contigList=ctL, coreBinList=crL, originalBinList=obL)
+    contig_base = dfSlice.pop('ContigBase')
+    contig_fragments = dfSlice.pop('ContigName')
+    original_bin = dfSlice.pop('BinID')
 
-def ParseEsomForErrorProfiling(esomTable, coverageTablePath, binMembershipFlag, coreContigTable):
+    dfSlice.drop('Bin', axis=1, inplace=True)
+
+    return eObj(ord_values=dfSlice.values, contig_base=contig_base, contig_fragments=contig_fragments, original_bin=original_bin)
+
+def ParseEsomForErrorProfiling(esomTable, binMembershipFlag, coreContigTable):
 
     '''
         Input:
@@ -365,10 +332,9 @@ def ParseEsomForErrorProfiling(esomTable, coverageTablePath, binMembershipFlag, 
             1. Read in the esomTable as esomTableErr, and remap column maps to that of the training data
                 1.1 ContigName => Contig
                 1.2 BinID => OriginalBin
-            2. If coverage values are provided, these are appended through the _appendCoverageTable() function, then scaled with the _scaleColumns() function
-            3. If bin membership is request for training, these are appended through the _appendBinMembership() function
-            4. The column CoreBin is appended to esomTableErr, via the _binMembershipGenerator() function
-            5. esomTableErr is split into an eObj variable for non-core contigs
+            2. If bin membership is request for training, these are appended through the _appendBinMembership() function
+            3. The column CoreBin is appended to esomTableErr, via the _binMembershipGenerator() function
+            4. esomTableErr is split into an eObj variable for non-core contigs
 
         Result:
             1. An eObj tuple is returned to main(), with the values
@@ -385,11 +351,6 @@ def ParseEsomForErrorProfiling(esomTable, coverageTablePath, binMembershipFlag, 
         Input and output data take the same form as ParseEsomForTraining().
     '''
     esomTableErr = esomTable.rename(index=str, columns={'ContigName': 'Contig', 'BinID': 'OriginalBin'} )
-
-    ''' Append and normalise data, as for training workflow '''
-    if coverageTablePath:
-        esomTableErr, coverageFeatures = _appendCoverageTable(esomTableErr, coverageTablePath, 'Contig')
-        esomTableErr = _scaleColumns(esomTableErr, coverageFeatures)
 
     if binMembershipFlag: esomTableErr, _ = _appendBinMembership(esomTableErr, 'OriginalBin')
 
@@ -414,35 +375,7 @@ def _identifyFeatureColumns(columnValues):
 
     return [ x for x in columnValues if re.match( r'V\d+$', x) ]
 
-def _appendCoverageTable(baseFrame, coverageTablePath, contigColumnName):
-
-    '''
-        Input:
-            1. A DataFrame with the columns V*, Contig, and OriginalBin
-            2. The path to the table of coverage values
-            3. The name for the column that identifies contigs in the baseFrame
-
-        Action:
-            1. Read the coverage table, and rename columns to [ contigColumnName, Coverage1, Coverage2, ... ]
-            2. Merge the baseFrame and coverage table by a left join, discarding coverage values for contigs not in the ESOM
-
-        Result:
-            1. A modified baseFrame with the new columns Coverage* is returned to the calling function
-            2. A list of coverage column names is returned to the calling function
-    '''
-
-    covFrame = pd.read_csv(coverageTablePath, sep='\t')
-
-    ''' Overwrite the column names with predictable values '''
-    colNames = [ 'Coverage{}'.format(i) for i in range(1, covFrame.shape[1]) ]
-    colNames.insert(0, contigColumnName)
-    covFrame.columns = colNames
-
-    ''' Append the data to the ESOM table '''
-    baseFrame = baseFrame.merge(covFrame, how='left', on=contigColumnName)
-    return baseFrame, colNames[1:]
-
-def _appendBinMembership(baseFrame, columnName):
+def _appendBinMembership(baseFrame):
 
     '''
         Input:
@@ -455,59 +388,11 @@ def _appendBinMembership(baseFrame, columnName):
 
         Result:
             1. A modified baseFrame with the in identifies encoded as numeric values is returned to the calling function
-            2. A list of bin column names is returned to the calling function (not needed?)
     '''
 
-    onehotFrame = pd.get_dummies( baseFrame[columnName] )
+    onehotFrame = pd.get_dummies( baseFrame.BinID )
     newFrame = pd.concat( [baseFrame, onehotFrame], axis=1 )
-    return newFrame, onehotFrame.columns
-
-def _scaleColumns(_df, _columns, _method=None):
-
-    '''
-        Input:
-            1. A DataFrame of unknown columns
-            2. A list of columns to be normalised
-            3. Method of normalisation. Currently not active, Z-transform by default
-
-        Action:
-            1. For each column, normalise according to calling specification
-
-        Result:
-            1. A DataFrame with the same columns as input, with relevant columns normalised, is returned to the calling function
-
-    '''
-
-    if _method:
-        ''' Can add the option for more complicated scaling later on '''
-        pass
-
-    else:
-        for c in _columns:
-            _df[c] = preprocessing.scale( _df[c] )
-
-    return _df
-
-def _binMembershipGenerator(contigstoAssign, coreContigTable):
-
-    '''
-        Input:
-            1. A list of all contigs needing to be attributed to a core bin
-            2. A DataFrame of core contigs and their bin, with the columns Bin, ContigBase
-    
-        Action:
-            1. Build a generator that maps contigs to either their core bin, or '-' for non-core contigs
-
-        Result:
-            1. No variables are returned to calling function. Acts as a generator that exhausts itself then terminates
-
-    '''
-
-    contigMap = { c: b for c, b in zip(coreContigTable.ContigBase, coreContigTable.Bin) }
-
-    for contig in contigstoAssign:
-
-        yield contigMap[contig] if contig in contigMap else '-'
+    return newFrame
 
 # endregion
 
