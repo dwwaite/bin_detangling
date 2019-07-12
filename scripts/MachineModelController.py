@@ -5,7 +5,7 @@
     TODO: Implement ThreadManager class to speed up assignment using RandomForest
 '''
 # General modules
-import sys, os, glob
+import sys, os, glob, joblib
 from collections import Counter
 from operator import itemgetter
 import pandas as pd
@@ -18,7 +18,7 @@ from scripts.ThreadManager import ThreadManager
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.base import clone
 from sklearn.metrics import f1_score, matthews_corrcoef, roc_auc_score
-from sklearn.externals import joblib
+#from sklearn.externals import joblib
 
 # sklearn classifiers
 from sklearn import svm
@@ -356,12 +356,12 @@ class MachineController():
                 2. lTrain = labels matching dTrain rows to group (bin)
                 3. dValidate = features not used in model training, for testing model accuracy
                 4. lValidate = labels of the expected classification for dValidate '''        
-        for tr, te in spliterObj.split(esom_obj.ord_values, esom_obj.original_bin):
+        for tr, te in spliterObj.split(esom_obj.scaled_features, esom_obj.original_bin):
 
-            dTrain = esom_obj.ord_values[ tr, ]
+            dTrain = esom_obj.scaled_features[ tr, ]
             lTrain = [ list(esom_obj.original_bin)[x] for x in tr ]
 
-            dValidate = esom_obj.ord_values[ te, ]            
+            dValidate = esom_obj.scaled_features[ te, ]            
             lValidate = [ list(esom_obj.original_bin)[x] for x in te ]
 
             yield dTrain, lTrain, dValidate, lValidate

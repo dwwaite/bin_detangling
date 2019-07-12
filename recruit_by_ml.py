@@ -74,8 +74,8 @@ def main():
     ValidateDataFrameColumns(df=coreContigTable, columnsRequired=['Bin', 'Contig'])
    
     esomCore, esomCloud = ParseEsomForTraining(userTable, options.use_bin_membership, coreContigTable)
-    #_peakIntoObj(esomCore)
-    #_peakIntoObj(esomCloud)
+    #_peak_into_obj(esomCore)
+    #_peak_into_obj(esomCloud)
     #sys.exit()
 
     options.models = ExtractAndVerifyModelChoices(options.models)
@@ -125,7 +125,7 @@ def main():
 
     ''' Step 4. '''
     #esomConfidence = ParseEsomForErrorProfiling(userTable, options.use_bin_membership, coreContigTable)
-    #_peakIntoObj(esomConfidence)
+    #_peak_into_obj(esomConfidence)
     #sys.exit()
 
     #confidenceClassify = machineModelController.ClassifyByEnsemble(esomConfidence.ordValues, esomConfidence.contigList)
@@ -223,7 +223,7 @@ def ExtractAndVerifyLayerChoices(neuronString, esomCore):
             sys.exit()
 
     ''' Otherwise, infer from the data '''
-    input_layer = esomCore.ord_values.shape[1]
+    input_layer = esomCore.scaled_features.shape[1]
     output_layer = len( esomCore.original_bin.unique() )
     hidden_layer = (input_layer + output_layer) / 2
 
@@ -251,7 +251,7 @@ def ParseEsomForTraining(esomTable, binMembershipFlag, coreContigTable):
                 1.1 V* - New ~coordinates from ESOM
                 1.2 Contig - The value of ContigBase used to group the fragments
                 1.3 OriginalBin - The value of BinID
-            3. If bin membership is request for training, these are appended through the _appendBinMembership() function
+            3. If bin membership is request for training, these are appended through the _append_bin_membership() function
             4. esomTable is split into the eObjs esomCore and esomCloud
                 These capture which contigs used for training/validation (esomCore) and classification (esomCloud)
 
@@ -265,15 +265,15 @@ def ParseEsomForTraining(esomTable, binMembershipFlag, coreContigTable):
 
     ''' If required, encode bin identity as new factors '''
     if binMembershipFlag:
-        join_df = _appendBinMembership(join_df)
+        join_df = _append_bin_membership(join_df)
 
     ''' Pop off the text columns and create namedtuples carrying the information needed for ML processing '''
-    esomCore = _bindToTableObj( join_df[ join_df.Bin != '-' ] )
-    esomCloud = _bindToTableObj( join_df[ join_df.Bin == '-' ] )
+    esomCore = _bind_to_table_obj( join_df[ join_df.Bin != '-' ] )
+    esomCloud = _bind_to_table_obj( join_df[ join_df.Bin == '-' ] )
 
     return esomCore, esomCloud
 
-def _peakIntoObj(o):
+def _peak_into_obj(o):
 
     '''
         DEBUG ONLY
@@ -288,32 +288,39 @@ def _peakIntoObj(o):
             1. No values are returned to calling function
 
     '''
-    print('\n\nordValues'); print(o.ord_values)
+    print('\n\nordValues'); print(o.scaled_features)
     print('\ncontig_base'); print(o.contig_base[0:5] )
     print('\ncontig_fragments'); print( o.contig_fragments[0:5] )
     print('\noriginal_bin (set)'); print( set(o.original_bin) )
 
-def _bindToTableObj(dfSlice):
+def _bind_to_table_obj(dfSlice):
 
     '''
         Input:
             1. A DataFrame with the columns V*, ContigBase, ContigName, BinID, Bin, and optionally bin dummies        
         Action:
             1. Splits the DataFrame into a new DataFrame retaining only numeric values needed for modeling
+            2. Scale the ESOM coords with unit scaling
             2. Bind the text columns to new variables in the object
         Result:
             1. An eObj is returned to the calling function ParseEsomForTraining() or ParseEsomForErrorProfiling()
     '''
 
-    eObj = namedtuple('eObj', 'ord_values contig_base contig_fragments original_bin')
+    eObj = namedtuple('eObj', 'scaled_features contig_base contig_fragments original_bin')
 
     contig_base = dfSlice.pop('ContigBase')
     contig_fragments = dfSlice.pop('ContigName')
     original_bin = dfSlice.pop('BinID')
 
-    dfSlice.drop('Bin', axis=1, inplace=True)
+    ''' Create a copy of the original dfSlice, mainly just to avoid copy modification warnings '''
+    feature_df = dfSlice.drop('Bin', axis=1)
 
-    return eObj(ord_values=dfSlice.values, contig_base=contig_base, contig_fragments=contig_fragments, original_bin=original_bin)
+    tsne_coord_columns = [ c for c in feature_df.columns if re.match( r'V\d+$', c) ]
+    for tsne_coord_column in tsne_coord_columns:
+
+        feature_df[ tsne_coord_column ] = preprocessing.scale( dfSlice[ tsne_coord_column ] )
+
+    return eObj(scaled_features=feature_df.values, contig_base=contig_base, contig_fragments=contig_fragments, original_bin=original_bin)
 
 def ParseEsomForErrorProfiling(esomTable, binMembershipFlag, coreContigTable):
 
@@ -332,7 +339,7 @@ def ParseEsomForErrorProfiling(esomTable, binMembershipFlag, coreContigTable):
             1. Read in the esomTable as esomTableErr, and remap column maps to that of the training data
                 1.1 ContigName => Contig
                 1.2 BinID => OriginalBin
-            2. If bin membership is request for training, these are appended through the _appendBinMembership() function
+            2. If bin membership is request for training, these are appended through the _append_bin_membership() function
             3. The column CoreBin is appended to esomTableErr, via the _binMembershipGenerator() function
             4. esomTableErr is split into an eObj variable for non-core contigs
 
@@ -352,30 +359,15 @@ def ParseEsomForErrorProfiling(esomTable, binMembershipFlag, coreContigTable):
     '''
     esomTableErr = esomTable.rename(index=str, columns={'ContigName': 'Contig', 'BinID': 'OriginalBin'} )
 
-    if binMembershipFlag: esomTableErr, _ = _appendBinMembership(esomTableErr, 'OriginalBin')
+    if binMembershipFlag: esomTableErr, _ = _append_bin_membership(esomTableErr, 'OriginalBin')
 
     ''' Slice the esomTableErr down to just the expected columns '''
     fragmentNames = esomTableErr.pop('ContigBase')
     esomTableErr['CoreBin'] = [ b for b in _binMembershipGenerator(fragmentNames, coreContigTable) ]
 
-    return _bindToTableObj( esomTableErr[ esomTableErr.CoreBin != '-' ] )
+    return _bind_to_table_obj( esomTableErr[ esomTableErr.CoreBin != '-' ] )
 
-def _identifyFeatureColumns(columnValues):
-
-    '''
-        Input:
-            1. a DataFrame of unknown columns, but where some meet the criteria of V[digit]
-
-        Action:
-            1. Identify which columns in the DataFrame match the criteria via regex
-        
-        Result:
-            1. A list of column names matching the pattern are returned to the calling function ParseEsomForTraining()
-    '''
-
-    return [ x for x in columnValues if re.match( r'V\d+$', x) ]
-
-def _appendBinMembership(baseFrame):
+def _append_bin_membership(baseFrame):
 
     '''
         Input:
