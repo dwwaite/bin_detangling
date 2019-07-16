@@ -1,18 +1,17 @@
 '''
     Rapid/debug run - drop RF for increased speed
-    python recruit_by_ml.py nano .table.core_table.txt
+    python recruit_by_ml.py -e tests/mock.table.txt -m NN,SVML,SVMP,SVMR --evaluate-only tests/mock.table.core_table.txt
     python recruit_by_ml.py -e tests/mock.table.txt --reload -m RF,SVML,SVMP,SVMR tests/mock.table.core_table.txt
 '''
 
 import sys, os, re
 import pandas as pd
-import numpy as np
 from optparse import OptionParser
 from collections import namedtuple
-import matplotlib.pyplot as plt
-
-# sklearn libraries for model training, classification, and saving
 from sklearn import preprocessing
+
+#import numpy as np
+#import matplotlib.pyplot as plt
 
 # My functions and classes
 from scripts.OptionValidator import ValidateFile, ValidateInteger, ValidateStringParameter, ValidateDataFrameColumns

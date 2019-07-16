@@ -5,10 +5,11 @@
     TODO: Implement ThreadManager class to speed up assignment using RandomForest - this will require caching of the SSS data, and running RF in a separate loop to other ML models
 '''
 # General modules
-import sys, os, glob, joblib
+import sys, os, glob, warnings#, joblib
 from collections import Counter
 from operator import itemgetter
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 
 # My modules
@@ -18,6 +19,7 @@ from scripts.ThreadManager import ThreadManager
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.base import clone
 from sklearn.metrics import f1_score, matthews_corrcoef, roc_auc_score
+from sklearn.externals import joblib
 
 # sklearn classifiers
 from sklearn import svm
@@ -192,22 +194,11 @@ class MachineController():
 
     def _compute_model_scores(self, model_type, split_iteration, label_validate, model_calls, model_conf):
 
-        model_mask = [ x == y for x, y in zip(label_validate, model_calls) ]
+        f1 = self._masked_f_score(label_validate, model_calls)
+        roc_auc = self._masked_roc_auc_score(label_validate, model_calls, model_conf, model_type, split_iteration)
+        mcc = self._masked_mcc_score(label_validate, model_calls, model_type, split_iteration)
 
-        if len( set(model_mask) ) == 1:
-
-            bool_type = str( model_mask[0] ).lower()
-            print( 'Warning: All predictions on iteration {} / model {} are {}, ROC AUC values are invalid.'.format(split_iteration, model_type, bool_type) )
-            roc_auc = 0
-
-        else:
-            roc_auc = roc_auc_score(model_mask, model_conf)
-
-        return { 'Model': model_type,
-                 'Iteration': split_iteration,
-                 'F1': f1_score(label_validate, model_calls, average='weighted'),
-                 'MCC': matthews_corrcoef(label_validate, model_calls),
-                 'ROC_AUC':  roc_auc }
+        return { 'Model': model_type, 'Iteration': split_iteration, 'F1': f1, 'MCC': mcc, 'ROC_AUC':  roc_auc }
 
     def _train_model(self, _model_base, _data_train, _label_train):
 
@@ -216,46 +207,131 @@ class MachineController():
         currModel.fit(_data_train, _label_train)
         return currModel
 
+    def _masked_roc_auc_score(self, exp, pred, conf, model, i):
+
+        ''' The ROC-AUC is a bit different to F1 and MCC, which are just worked out from the confusion matrix.
+
+            ROC-AUC requires a binary mask of correct/incorrect predictions, and the model confidences associated with them. In the event of all predictions being
+                correct of incorrect, it will crash, so this is avoided with this function. Crashes are avoided, but NaN is returned. '''
+
+        model_mask = [ x == y for x, y in zip(exp, pred) ]
+
+        if len( set(model_mask) ) == 1:
+
+            print( 'Warning: Invalid values encountered for ROC AUC on model {} (iteration {}).'.format(model, i) )
+            return np.NaN
+
+        else:
+            return roc_auc_score(model_mask, conf)
+
+    def _masked_mcc_score(self, exp, pred, model, i):
+
+        ''' There's an edge case for the MCC calculation where if all predictions are to a single class, the calculation fails due to zeroes in the donominator.
+        
+            In this case, the return value is 0. This is fine, because 0 is the worst outcome for MCC and the summary will report it as rubbish.
+            This function is just to suppress the warnings, since I'm happy with how they handle the case. '''
+
+        with warnings.catch_warnings(record=True) as w:
+
+            mcc = matthews_corrcoef(exp, pred)
+
+            if len(w) > 0:
+
+                warning_msg = str(w[-1].message)
+                if 'invalid value encountered in double_scalars' in warning_msg:
+
+                    print( 'Warning: Invalid values encountered for MCC on model {} (iteration {}).'.format(model, i) )
+                    return np.NaN
+
+                else:
+                    print( warning_msg )
+
+        return mcc
+
+    def _masked_f_score(self, exp, pred):
+
+        ''' sklearn implementation of the F1 throws warnings with weighted averaging method, claiming it is setting value to 0.
+            After extensive testing, I'm happy that this is not the case and that it is returning a real F1.
+
+            Use a context manager to filter out these specific warnings. '''
+
+        with warnings.catch_warnings(record=True) as w:
+
+            f1 = f1_score(exp, pred, average='weighted')
+
+            if len(w) > 0:
+
+                warning_msg = str(w[-1].message)
+                if not 'F-score is ill-defined and being set to 0.0' in warning_msg:
+
+                    print( warning_msg )
+
+            return f1
+
     def report_training(self):
 
         ''' Write as table... '''
         self._accuracy.to_csv(self._output_path_map['training_table'], index=False, sep='\t')
         
-        ''' Organise data ready for violin plots '''
-
-        model_sequence = sorted( self._accuracy.Model.unique() )
-        f1 = [None] * len(model_sequence)
-        mcc = [None] * len(model_sequence)
-        auc = [None] * len(model_sequence)
-
-        for i, model in enumerate(model_sequence):
-
-            df = self._accuracy[  self._accuracy.Model == model  ]
-            f1[i] = df.F1
-            mcc[i] = df.MCC
-            auc[i] = df.ROC_AUC
-
         ''' Begin plotting '''
+
+        model_seq = sorted( self._accuracy.Model.unique() )
+        title_seq = ['F1 values', 'MCC values', 'ROC-AUC values']
+        col_seq = [ 'F1', 'MCC', 'ROC_AUC' ]
+
         plt.clf()
-        _, (ax1, ax2, ax3) = plt.subplots(nrows=1, ncols=3, sharey=True)
+        _, axes = plt.subplots(nrows=1, ncols=len(col_seq), sharey=True)
 
-        seq_ax = (ax1, ax2, ax3)
-        seq_title = ('F1 values', 'MCC values', 'ROC-AUC values')
-        seq_value = (f1, mcc, auc)
+        for i, plot_array in self._summarise_model_scores(col_seq, model_seq):
 
-        for a, t, v in zip(seq_ax, seq_title, seq_value):
+            axes[i].set_title( title_seq[i] )
+            p = axes[i].violinplot(plot_array, showmeans=False, showmedians=True)
 
-            a.set_title(t)
-            p = a.violinplot(v, showmeans=False, showmedians=True)
-            self._customise_violin_plot(p)
-
-            plt.setp(a, xticks=[ y+1 for y in range(len(model_sequence)) ], xticklabels=[ self._textMask[m] for m in model_sequence ])
-            plt.setp(a.get_xticklabels(), rotation=90)
+            self._customise_violin_axes(axes[i], p, model_seq, plot_array)
+            self._customise_violin_colours(p)
 
         plt.savefig(self._output_path_map['training_plot_raster'], bbox_inches='tight')
         plt.savefig(self._output_path_map['training_plot_vector'], bbox_inches='tight')
 
-    def _customise_violin_plot(self, _v):
+    def _summarise_model_scores(self, col_seq, model_seq):
+
+        for i, c in enumerate(col_seq):
+
+            plot_array = []
+
+            for model in model_seq:
+
+                df = self._accuracy[ self._accuracy.Model == model ]
+
+                score_vector = [ v for v in df[c] if not np.isnan(v) ]
+                if len(score_vector) > 0:
+                    plot_array.append( score_vector )
+
+                else:
+                    plot_array.append( [0] )
+
+            yield i, plot_array
+
+    def _customise_violin_axes(self, a, p, model_seq, plot_array):
+
+        ''' Determine the text for plot axes. Since there is a single value of 0 for models with no valid scores,
+                need flow control to determine the correct label for each model '''
+
+        x_tick_text = []
+        for i, m in enumerate(model_seq):
+
+            if len(plot_array[i]) == 1 and plot_array[i][0] == 0:
+                x_tick_text.append('{} (n=0)'.format( self._textMask[m] ) )
+
+            else:
+                x_tick_text.append('{} (n={})'.format( self._textMask[m], len(plot_array[i]) ) )
+
+        n_models = len( model_seq )
+        plt.setp(a, xticks=[ y+1 for y in range(n_models) ], xticklabels=x_tick_text)
+
+        plt.setp(a.get_xticklabels(), rotation=90)
+
+    def _customise_violin_colours(self, _v):
 
         for b in _v['bodies']:
             b.set_facecolor('g')
