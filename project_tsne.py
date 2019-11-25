@@ -40,6 +40,9 @@ def main():
     if options.weighting:
         options.weighting = parse_and_validate_weighting(options.weighting)
 
+        if not options.weighting:
+            sys.exit()
+
     '''
         Real workflow
 
@@ -76,13 +79,16 @@ def parse_and_validate_weighting(weight_value):
 
     weight_value = ValidateFloat(userChoice=weight_value, parameterNameWarning='coverage weighting', behaviour='abort')
 
+    if weight_value is None:
+        return None
+
     if weight_value > 1.0:
-        print('Error: Trying to weight coverage for more than 100% of data.')
-        sys.exit()
+        print('Error: Trying to weight coverage for more than 100% of data, setting to 1.0.')
+        return 1.0
 
     elif weight_value < 0:
-        print('Error: Trying to weight coverage for less than 0% of data.')
-        sys.exit()
+        print('Error: Trying to weight coverage for less than 0% of data, setting to uniform.')
+        return None
 
     return weight_value
 

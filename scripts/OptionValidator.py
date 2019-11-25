@@ -130,6 +130,6 @@ def ValidateFloat(userChoice, parameterNameWarning, behaviour, defaultValue=None
         if behaviour == 'abort':
 
             print( 'Unable to accept value {} for {}, aborting...'.format(userChoice, parameterNameWarning, defaultValue) )
-            sys.exit()
+            return None
 
 # endregion
