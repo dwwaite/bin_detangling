@@ -32,6 +32,9 @@ def main():
         Check that bins specified are actually correct, and if a default value is given, overwrite the list '''
     bin_precursors = validate_input_data(bin_names, options.esomTable, options.slices, options.bias_threshold, options.output)
 
+    if bin_precursors is None:
+        sys.exit()
+
     fragment_counts = count_all_fragments(options.esomTable)  
 
     ''' Distribute the jobs over the threads provided
@@ -73,7 +76,7 @@ def validate_input_data(bin_names, esom_table_name, number_of_slices, bias_thres
     ''' Ensure there is at least one valid result '''
     if len(bin_precursors) == 0:
         print('Unable to locate any valid contig lists. Aborting...')
-        sys.exit()
+        return None
 
     return bin_precursors
 
