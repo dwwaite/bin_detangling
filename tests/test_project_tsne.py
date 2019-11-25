@@ -3,14 +3,21 @@
 '''
 import sys
 import io
+import os
 import unittest
-#import os
+import pandas as pd
+
 
 class TestProjectTsne(unittest.TestCase):
 
     def setUp(self):
         #@unittest.skip('Not implemented yet')
-        pass
+        self.temp_file_buffer = []
+
+    def tearDown(self):
+
+        for temp_file in self.temp_file_buffer:
+            os.remove(temp_file)
 
     # region Capture stdout for evaluating print() statements
 
@@ -25,13 +32,43 @@ class TestProjectTsne(unittest.TestCase):
     # endregion
 
     # region Tests for the section Pre-workflow overhead
-    @unittest.skip('Not implemented yet')
-    def test_read_and_validate_table(self):
-        pass
 
-    @unittest.skip('Not implemented yet')
+    def spawn_mock_table(self, save_file=None):
+
+        df = pd.DataFrame([ { 'Contig': 'contig_1', 'AAAA': 0.5, 'AAAC': 0.5, 'Cov1': 10 },
+                            { 'Contig': 'contig_2', 'AAAA': 1.0, 'AAAC': 0.0, 'Cov1': 20 },
+                            { 'Contig': 'contig_3', 'AAAA': 0.7, 'AAAC': 0.3, 'Cov1': 5 } ] )
+
+        if save_file:
+            df.to_csv(save_file, sep='\t', index=False)
+            self.temp_file_buffer.append(save_file)
+
+        return df
+
+    def test_read_and_validate_table(self):
+
+        mock_table = self.spawn_mock_table(save_file='mock.txt')
+
+        df = project_tsne.read_and_validate_table('mock.txt', 'Cov')
+
+        ''' Test all columns are preserved, and then the content of the first row. '''
+        for col in mock_table.columns:
+            self.assertIn(col, df.columns)
+
+        exp_row = mock_table.iloc[0,:]
+        obs_row = df.iloc[0,:]
+
+        for col in mock_table.columns:
+            self.assertEqual( exp_row[col], obs_row[col] )
+
     def test_read_and_validate_table_notexist(self):
-        pass
+
+        self.start_logging_stdout()
+        df = project_tsne.read_and_validate_table('does_not_exist.txt', 'Cov')
+        print_capture = self.stop_logging_stdout()
+
+        self.assertIsNone(df)
+        self.assertIn('Warning: Unable to detect feature table does_not_exist.txt, aborting...', print_capture)
 
     @unittest.skip('Not implemented yet')
     def test_read_and_validate_table_missing_col(self):
@@ -39,12 +76,12 @@ class TestProjectTsne(unittest.TestCase):
     """
     def read_and_validate_table(ftable_name, cov_prefix):
 
-    ftable = pd.read_csv(ftable_name, sep='\t')
+        ftable = pd.read_csv(ftable_name, sep='\t')
 
-    # Assume there must be able least one coverage column
-    ValidateDataFrameColumns(ftable, ['Contig', '{}1'.format(cov_prefix) ])
+        # Assume there must be able least one coverage column
+        ValidateDataFrameColumns(ftable, ['Contig', '{}1'.format(cov_prefix) ])
 
-    return ftable
+        return ftable
     """
 
     def test_parse_and_validate_weighting(self):
@@ -66,26 +103,6 @@ class TestProjectTsne(unittest.TestCase):
 
         self.assertIn('Unable to accept value abc for coverage weighting, aborting...', print_capture)
 
-        """
-        def ValidateFloat(userChoice, parameterNameWarning, behaviour, defaultValue=None):
-
-            try:
-
-                f = float(userChoice)
-                return f
-
-            except:
-
-                if behaviour == 'default':
-
-                    print( 'Unable to accept value {} for {}, using default ({}) instead.'.format(userChoice, parameterNameWarning, defaultValue) )
-                    return defaultValue
-
-                if behaviour == 'abort':
-
-                    print( 'Unable to accept value {} for {}, aborting...'.format(userChoice, parameterNameWarning, defaultValue) )
-                    sys.exit()
-        """
     def test_parse_and_validate_weighting_high(self):
 
         self.start_logging_stdout()

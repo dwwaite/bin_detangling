@@ -34,8 +34,10 @@ def main():
     '''
         Pre-workflow overhead: Validation of user choices.
     '''
-    ValidateFile(inFile=feature_table_name, fileTypeWarning='feature table', behaviour='abort')
     feature_table = read_and_validate_table(feature_table_name, options.coverage)
+
+    if not feature_table:
+        sys.exit()
 
     if options.weighting:
         options.weighting = parse_and_validate_weighting(options.weighting)
@@ -68,6 +70,13 @@ def main():
 
 def read_and_validate_table(ftable_name, cov_prefix):
 
+    ''' Test that the input file exists '''
+    exists = ValidateFile(inFile=ftable_name, fileTypeWarning='feature table', behaviour='abort')
+
+    if exists is None:
+        return None
+
+    ''' If it does, test the contents '''
     ftable = pd.read_csv(ftable_name, sep='\t')
 
     # Assume there must be able least one coverage column
