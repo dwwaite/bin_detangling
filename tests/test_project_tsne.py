@@ -1,6 +1,3 @@
-'''
-    Automated testing of the creation, insertion, update, and delete functionality of the DatabaseManipulator class
-'''
 import sys
 import io
 import os
@@ -11,7 +8,6 @@ import numpy as np
 class TestProjectTsne(unittest.TestCase):
 
     def setUp(self):
-        #@unittest.skip('Not implemented yet')
         self.temp_file_buffer = []
 
     def tearDown(self):
@@ -160,7 +156,7 @@ class TestProjectTsne(unittest.TestCase):
 if __name__ == '__main__':
 
     ''' Import the project_tsne.py library '''
-    sys.path.insert(0,'..')
+    sys.path.insert(0, '..')
     import project_tsne
 
     unittest.main()
