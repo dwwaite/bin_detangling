@@ -7,7 +7,7 @@ import os
 import unittest
 import pandas as pd
 
-class TestProjectTsne(unittest.TestCase):
+class TestExpandByMcc(unittest.TestCase):
 
     def setUp(self):
         self.temp_file_buffer = []
