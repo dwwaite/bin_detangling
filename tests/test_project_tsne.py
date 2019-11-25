@@ -48,7 +48,6 @@ class TestProjectTsne(unittest.TestCase):
     def test_read_and_validate_table(self):
 
         mock_table = self.spawn_mock_table(save_file='mock.txt')
-
         df = project_tsne.read_and_validate_table('mock.txt', 'Cov')
 
         ''' Test all columns are preserved, and then the content of the first row. '''
@@ -70,19 +69,16 @@ class TestProjectTsne(unittest.TestCase):
         self.assertIsNone(df)
         self.assertIn('Warning: Unable to detect feature table does_not_exist.txt, aborting...', print_capture)
 
-    @unittest.skip('Not implemented yet')
     def test_read_and_validate_table_missing_col(self):
-        pass
-    """
-    def read_and_validate_table(ftable_name, cov_prefix):
 
-        ftable = pd.read_csv(ftable_name, sep='\t')
+        mock_table = self.spawn_mock_table(save_file='mock.txt')
 
-        # Assume there must be able least one coverage column
-        ValidateDataFrameColumns(ftable, ['Contig', '{}1'.format(cov_prefix) ])
+        self.start_logging_stdout()
+        df = project_tsne.read_and_validate_table('mock.txt', 'Coverage')
+        print_capture = self.stop_logging_stdout()
 
-        return ftable
-    """
+        self.assertIsNone(df)
+        self.assertIn('Unable to find required column Coverage1, aborting...', print_capture)
 
     def test_parse_and_validate_weighting(self):
 

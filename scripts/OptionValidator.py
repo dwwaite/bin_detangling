@@ -58,10 +58,12 @@ def ValidateDataFrameColumns(df, columnsRequired):
 
             assert( reqColumn in df.columns ), reqColumn
 
+        return True
+
     except AssertionError as ae:
 
         print( '\nUnable to find required column {}, aborting...'.format(ae) )
-        sys.exit()
+        return False
 
 # endregion 
 

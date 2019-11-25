@@ -80,7 +80,9 @@ def read_and_validate_table(ftable_name, cov_prefix):
     ftable = pd.read_csv(ftable_name, sep='\t')
 
     # Assume there must be able least one coverage column
-    ValidateDataFrameColumns(ftable, ['Contig', '{}1'.format(cov_prefix) ])
+    is_valid = ValidateDataFrameColumns(ftable, ['Contig', '{}1'.format(cov_prefix) ])
+    if not is_valid:
+        return None
 
     return ftable
 
