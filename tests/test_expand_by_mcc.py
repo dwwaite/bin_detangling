@@ -92,7 +92,7 @@ class TestExpandByMcc(unittest.TestCase):
 
 if __name__ == '__main__':
 
-    ''' Import the project_tsne.py library '''
+    ''' Import the expand_by_mcc.py library '''
     sys.path.insert(0, '..')
     import expand_by_mcc
 
