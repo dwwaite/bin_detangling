@@ -6,7 +6,7 @@ import io
 import os
 import unittest
 import pandas as pd
-
+import numpy as np
 
 class TestProjectTsne(unittest.TestCase):
 
@@ -114,6 +114,46 @@ class TestProjectTsne(unittest.TestCase):
         print_capture = self.stop_logging_stdout()
 
         self.assertIn('Error: Trying to weight coverage for less than 0% of data, setting to uniform.', print_capture)
+
+    # endregion
+
+    # region Tests for the section Clustering
+
+    def test_build_weighting_mask(self):
+
+        df = self.spawn_mock_table()
+        exp_weights = [0.166666667, 0.166666667, 0.166666667, 0.5]
+
+        obs_weights = project_tsne.build_weighting_mask(df.columns, 'Cov', 0.5)
+        self.assertTrue( np.allclose(obs_weights, exp_weights) )
+
+    def test_compute_dist_uniform(self):
+
+        df = self.spawn_mock_table()
+
+        ''' Need to pop the Contig column to replicate the main workflow '''
+        contig_sequence = df.pop('Contig')
+        obs_array = project_tsne.compute_dist(df, 'Cov', None)
+
+        exp_array = np.array([ [ 0., 10.02496883, 5.00799361],
+                               [10.02496883, 0., 15.0059988 ], 
+                               [ 5.00799361, 15.0059988, 0. ] ] )
+
+        self.assertTrue( np.allclose(obs_array, exp_array) )
+
+    def test_compute_dist_weighted(self):
+
+        df = self.spawn_mock_table()
+
+        ''' Need to pop the Contig column to replicate the main workflow '''
+        contig_sequence = df.pop('Contig')
+        obs_array = project_tsne.compute_dist(df, 'Cov', 0.5)
+
+        exp_array = np.array([ [ 0., 7.07990113, 3.5383612 ],
+                               [ 7.07990113, 0., 10.60872283],
+                               [ 3.5383612, 10.60872283, 0. ] ] )
+
+        self.assertTrue( np.allclose(obs_array, exp_array) )
 
     # endregion
 
