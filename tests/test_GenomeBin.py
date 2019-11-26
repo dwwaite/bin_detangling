@@ -33,8 +33,6 @@ class TestProjectTsne(unittest.TestCase):
 
     # region Tests for the section Internal manipulation functions and constructor
     
-
-
     def spawn_mock_table(self, save_file=None):
 
         df = pd.DataFrame([ { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|1', 'V1': 0.50, 'V2': 0.50, 'BinID': 'bin_1', },
