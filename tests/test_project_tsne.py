@@ -47,8 +47,7 @@ class TestProjectTsne(unittest.TestCase):
         df = project_tsne.read_and_validate_table('mock.txt', 'Cov')
 
         ''' Test all columns are preserved, and then the content of the first row. '''
-        for col in mock_table.columns:
-            self.assertIn(col, df.columns)
+        self.assertListEqual( list(df.columns), list(mock_table.columns) )
 
         exp_row = mock_table.iloc[0,:]
         obs_row = df.iloc[0,:]
