@@ -106,14 +106,15 @@ class GenomeBin:
 
             slice_index = np.sin( x / self.number_of_slices * np.pi/2 ) * n_contigs
             slice_index = int(slice_index)
-            curr_slice = index_list[ slice_index ]
-
-            yield self.esom_table.iloc[ 0:curr_slice, ]
 
             ''' Break the loop if we've hit the end of the curve early.
                 This can happen for the last entry due to int rounding of the index '''
-            if slice_index + 1 == n_contigs:
-                break
+            if slice_index >= n_contigs:
+                yield self.esom_table
+                return
+
+            curr_slice = index_list[ slice_index ]
+            yield self.esom_table.iloc[ 0:curr_slice, ]
 
         yield self.esom_table
 

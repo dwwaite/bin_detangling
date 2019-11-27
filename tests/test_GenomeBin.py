@@ -31,10 +31,15 @@ class TestProjectTsne(unittest.TestCase):
 
     def spawn_mock_table(self, save_file=None):
 
-        df = pd.DataFrame([ { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|1', 'V1': 0.50, 'V2': 0.50, 'BinID': 'bin_1', },
-                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|2', 'V1': 0.55, 'V2': 0.45, 'BinID': 'bin_1', },
-                            { 'ContigBase': 'contig_2', 'ContigName': 'contig_2|1', 'V1': 0.70, 'V2': 0.55, 'BinID': 'bin_2', },
-                            { 'ContigBase': 'contig_3', 'ContigName': 'contig_3|1',  'V1': 0.80, 'V2': 0.65, 'BinID': 'bin_1', } ] )
+        df = pd.DataFrame([ { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|1', 'V1': 0.1, 'V2': 0.1, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|2', 'V1': 0.4, 'V2': 0.2, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|3', 'V1': 0.5, 'V2': 0.1, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|4', 'V1': 0.2, 'V2': -0.3, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|5', 'V1': 0.3, 'V2': -0.2, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_2', 'ContigName': 'contig_2|1', 'V1': 0.5, 'V2': -0.2, 'BinID': 'bin_2', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|6', 'V1': 0.6, 'V2': -0.3, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_3', 'ContigName': 'contig_3|1', 'V1': 0.6, 'V2': 0.4, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_3', 'ContigName': 'contig_3|2', 'V1': 0.8, 'V2': 0.3, 'BinID': 'bin_1', } ] )
 
         if save_file:
             df.to_csv(save_file, sep='\t', index=False)
@@ -44,7 +49,7 @@ class TestProjectTsne(unittest.TestCase):
 
     def instantiate_bin(self):
         df = self.spawn_mock_table(save_file='mock.txt')
-        return GenomeBin(bin_name='bin_1', esom_path='mock.txt', bias_threshold=0.5, number_of_slices=3, output_path='debug'), df
+        return GenomeBin(bin_name='bin_1', esom_path='mock.txt', bias_threshold=1.0, number_of_slices=3, output_path='debug'), df
 
     def test_constructor(self):
 
@@ -52,11 +57,11 @@ class TestProjectTsne(unittest.TestCase):
 
         self.assertEqual(genome_bin.bin_name, 'bin_1')
         self.assertEqual(genome_bin.output_path, 'debug')
-        self.assertEqual(genome_bin.bias_threshold, 0.5)
+        self.assertEqual(genome_bin.bias_threshold, 1.0)
         self.assertEqual(genome_bin.number_of_slices, 3)
         self.assertIsNotNone(genome_bin.esom_table)
 
-        self.assertListEqual(genome_bin.mcc_expectation, [1.0, 1.0, 0.0, 1.0])
+        self.assertListEqual(genome_bin.mcc_expectation, [1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
         self.assertListEqual(genome_bin._iteration_scores, [])
         self.assertDictEqual(genome_bin._slice_df_lookup, {})
 
@@ -77,8 +82,8 @@ class TestProjectTsne(unittest.TestCase):
 
         ''' Test the centroid value '''
         cen_x, cen_y = genome_bin.centroid
-        self.assertEqual(cen_x, 0.55)
-        self.assertEqual(cen_y, 0.50)
+        self.assertEqual(cen_x, 0.45)
+        self.assertEqual(cen_y, 0.1)
 
     # endregion
 
@@ -98,15 +103,15 @@ class TestProjectTsne(unittest.TestCase):
     def test_get_next_slice(self):
 
         genome_bin, _ = self.instantiate_bin()
-        exp_sizes = [ 1, 3, 4 ]
+        exp_sizes = [4, 7, 9]
 
         obs_sizes = [ df.shape[0] for df in genome_bin._get_next_slice() ]
         self.assertListEqual(obs_sizes, exp_sizes)
-    
+
     def test_compute_mcc(self):
 
         genome_bin, _ = self.instantiate_bin()
-        exp_mcc = [ 1.0 / 3.0, -1.0 / 3.0, 0]
+        exp_mcc = [-0.3952847075210474, -0.1889822365046136, 0.0]
 
         obs_mcc = [ genome_bin._compute_mcc(df) for df in genome_bin._get_next_slice() ]
         self.assertListEqual(obs_mcc, exp_mcc)
@@ -127,13 +132,12 @@ class TestProjectTsne(unittest.TestCase):
 
         return key + 1
 
-
     def test_slice_contigs_bin(self):
 
         genome_bin, _ = self.instantiate_bin()
         max_key = self.store_slices(genome_bin)
 
-        exp_sizes = [1, 2, 3]
+        exp_sizes = [3, 6, 8]
 
         for i in range(0, max_key):
             df = genome_bin._slice_contigs_bin( str(i) )
@@ -146,18 +150,23 @@ class TestProjectTsne(unittest.TestCase):
         genome_bin, _ = self.instantiate_bin()
         max_key = self.store_slices(genome_bin)
 
-        exp_sizes = [0, 1, 1]
-        exp_sets = [ set([]), set(['bin_2']), set(['bin_2']) ]
-
         for i in range(0, max_key):
             df = genome_bin._slice_contigs_nonbin( str(i) )
 
-            self.assertEqual(df.shape[0], exp_sizes[i])
-            self.assertSetEqual( set(df.BinID), exp_sets[i] )
+            self.assertEqual(df.shape[0], 1)
+            self.assertSetEqual( set(df.BinID), set(['bin_2']) )
 
     # endregion
 
     # region Tests for the section Externally exposed functions
+
+    def test_computeCloudPurity(self):
+
+        pass
+        #genome_bin, _ = self.instantiate_bin()
+        #genome_bin.ComputeCloudPurity()
+
+
 
     """
     def ComputeCloudPurity(self):
