@@ -29,10 +29,6 @@ class TestProjectTsne(unittest.TestCase):
 
     # region Tests for the constructor
 
-    # endregion
-
-    # region Tests for the section Internal manipulation functions and constructor
-    
     def spawn_mock_table(self, save_file=None):
 
         df = pd.DataFrame([ { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|1', 'V1': 0.50, 'V2': 0.50, 'BinID': 'bin_1', },
@@ -46,15 +42,18 @@ class TestProjectTsne(unittest.TestCase):
 
         return df
 
+    def instantiate_bin(self):
+        df = self.spawn_mock_table(save_file='mock.txt')
+        return GenomeBin(bin_name='bin_1', esom_path='mock.txt', bias_threshold=0.5, number_of_slices=3, output_path='debug'), df
+
     def test_constructor(self):
 
-        df = self.spawn_mock_table(save_file='mock.txt')
-        genome_bin = GenomeBin(bin_name='bin_1', esom_path='mock.txt', bias_threshold=0.5, number_of_slices=1, output_path='debug')
+        genome_bin, _ = self.instantiate_bin()
 
         self.assertEqual(genome_bin.bin_name, 'bin_1')
         self.assertEqual(genome_bin.output_path, 'debug')
         self.assertEqual(genome_bin.bias_threshold, 0.5)
-        self.assertEqual(genome_bin.number_of_slices, 1)
+        self.assertEqual(genome_bin.number_of_slices, 3)
         self.assertIsNotNone(genome_bin.esom_table)
 
         self.assertListEqual(genome_bin.mcc_expectation, [1.0, 1.0, 0.0, 1.0])
@@ -65,8 +64,7 @@ class TestProjectTsne(unittest.TestCase):
 
     def test_esom_df(self):
 
-        df = self.spawn_mock_table(save_file='mock.txt')
-        genome_bin = GenomeBin(bin_name='bin_1', esom_path='mock.txt', bias_threshold=0.5, number_of_slices=1, output_path='debug')
+        genome_bin, df = self.instantiate_bin()
 
         ''' Test all columns are preserved and number of rows persists. Columns should be df + 1 due to the addition of the Distance column '''
         self.assertListEqual( list(genome_bin.esom_table.columns), ['BinID', 'ContigBase', 'ContigName', 'V1', 'V2', 'Distance'])
@@ -81,70 +79,81 @@ class TestProjectTsne(unittest.TestCase):
         cen_x, cen_y = genome_bin.centroid
         self.assertEqual(cen_x, 0.55)
         self.assertEqual(cen_y, 0.50)
-   
-    """
-        def _calc_dist(self, xCen, yCen, xPos, yPos):
-            dX = np.array(xCen - xPos)
-            dY = np.array(yCen - yPos)    
-            return np.sqrt( dX ** 2 + dY ** 2 )
 
-        def _get_next_slice(self):
+    # endregion
 
-            ''' Pull the indices for the contig fragments in the bin '''
-            index_list = list( self.esom_table[ self.esom_table.BinID == self.bin_name ].index )
-            n_contigs = len(index_list)
+    # region Tests for the section Internal manipulation functions and constructor
 
-            ''' Divide the index list into N slices, following a sine function '''
-            for x in range(1, self.number_of_slices + 1):
+    def test_calc_dist(self):
 
-                slice_index = np.sin( x / self.number_of_slices * np.pi/2 ) * n_contigs
-                slice_index = int(slice_index)
-                curr_slice = index_list[ slice_index ]
+        genome_bin, _ = self.instantiate_bin()
 
-                yield self.esom_table.iloc[ 0:curr_slice, ]
+        # Test two options, one using distance from 0, and one using negative values
+        obs_dist = genome_bin._calc_dist(0, 0, 3, 4)
+        self.assertEqual(obs_dist, 5.0)
 
-                ''' Break the loop if we've hit the end of the curve early.
-                    This can happen for the last entry due to int rounding of the index '''
-                if slice_index + 1 == n_contigs:
-                    break
+        obs_dist = genome_bin._calc_dist(-1, 0, 2, -4)
+        self.assertEqual(obs_dist, 5.0)
 
-        def _compute_mcc(self, slice_df):
+    def test_get_next_slice(self):
 
-            ''' There is an edge case where if there are no false contigs in a bin the MCC encounters a divide by zero.
-                    Generally this doesn't matter, because it results in a vector of 0.0 for the MCC, and the larger slice is reported
-                    for MCC ties.
-                    That said, this should be revised in the future.
+        genome_bin, _ = self.instantiate_bin()
+        exp_sizes = [ 1, 3, 4 ]
 
-            '''
-            obs_vector = [0.0] * len( self.mcc_expectation )
-            for i in range(0, slice_df.shape[0]): obs_vector[i] = 1.0
+        obs_sizes = [ df.shape[0] for df in genome_bin._get_next_slice() ]
+        self.assertListEqual(obs_sizes, exp_sizes)
+    
+    def test_compute_mcc(self):
 
-            '''
-            import warnings
-            with warnings.catch_warnings():
-                warnings.filterwarnings('error')
-                try:
-                    mcc = ...
-                except:
-                    return ...
-            '''
-            return matthews_corrcoef(self.mcc_expectation, obs_vector)
+        genome_bin, _ = self.instantiate_bin()
+        exp_mcc = [ 1.0 / 3.0, -1.0 / 3.0, 0]
 
-        def _store_quality_values(self, mcc, slice_key, area, perimeter, frame_slice):
+        obs_mcc = [ genome_bin._compute_mcc(df) for df in genome_bin._get_next_slice() ]
+        self.assertListEqual(obs_mcc, exp_mcc)
 
-            self._iteration_scores.append( { 'MCC': mcc, 'Key': slice_key, 'Area': area, 'Perimeter': perimeter })
-            self._slice_df_lookup[ slice_key ] = frame_slice
+    def test_store_quality_values(self):
 
-        def _slice_contigs_bin(self, slice_key):
+        genome_bin, _ = self.instantiate_bin()
+        exp_dict = { 'MCC': 0.75, 'Key': 'abcd', 'Area': 2.0, 'Perimeter': 1.0 }
 
-            df = self._slice_df_lookup[ slice_key ]
-            return df[ df.BinID == self.bin_name ]
+        genome_bin._store_quality_values(exp_dict['MCC'], exp_dict['Key'], exp_dict['Area'], exp_dict['Perimeter'], [])
+        self.assertDictEqual( genome_bin._iteration_scores[0], exp_dict )
+        self.assertListEqual( genome_bin._slice_df_lookup[ exp_dict['Key'] ], [] )
 
-        def _slice_contigs_nonbin(self, slice_key):
+    def store_slices(self, g_bin):
 
-            df = self._slice_df_lookup[ slice_key ]
-            return df[ df.BinID != self.bin_name ]
-    """
+        for key, df_slice in enumerate( g_bin._get_next_slice() ):
+            g_bin._store_quality_values(1.0, str(key), 2.0, 3.0, df_slice )
+
+        return key + 1
+
+
+    def test_slice_contigs_bin(self):
+
+        genome_bin, _ = self.instantiate_bin()
+        max_key = self.store_slices(genome_bin)
+
+        exp_sizes = [1, 2, 3]
+
+        for i in range(0, max_key):
+            df = genome_bin._slice_contigs_bin( str(i) )
+
+            self.assertEqual(df.shape[0], exp_sizes[i])
+            self.assertSetEqual( set(df.BinID), set(['bin_1']) )
+
+    def test_slice_contigs_nonbin(self):
+
+        genome_bin, _ = self.instantiate_bin()
+        max_key = self.store_slices(genome_bin)
+
+        exp_sizes = [0, 1, 1]
+        exp_sets = [ set([]), set(['bin_2']), set(['bin_2']) ]
+
+        for i in range(0, max_key):
+            df = genome_bin._slice_contigs_nonbin( str(i) )
+
+            self.assertEqual(df.shape[0], exp_sizes[i])
+            self.assertSetEqual( set(df.BinID), exp_sets[i] )
 
     # endregion
 
