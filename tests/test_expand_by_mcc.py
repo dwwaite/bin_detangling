@@ -113,7 +113,7 @@ class TestExpandByMcc(unittest.TestCase):
     def test_count_all_fragments(self):
 
         df = self.spawn_contig_fragments('mock.txt')
-
+        
         exp_counts = {'contig_1': 6, 'contig_2': 1, 'contig_3': 2}
         obs_counts = expand_by_mcc.count_all_fragments('mock.txt')
 

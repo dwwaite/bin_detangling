@@ -3,8 +3,9 @@ import io
 import os
 import unittest
 import pandas as pd
+import numpy as np
 
-class TestProjectTsne(unittest.TestCase):
+class TestGenomeBin(unittest.TestCase):
 
     def setUp(self):
         #@unittest.skip('Not implemented yet')
@@ -162,55 +163,44 @@ class TestProjectTsne(unittest.TestCase):
 
     def test_computeCloudPurity(self):
 
-        pass
-        #genome_bin, _ = self.instantiate_bin()
-        #genome_bin.ComputeCloudPurity()
+        ''' Set a list of dicts of expected values '''
+        exp_scores = [ {'MCC': -0.395, 'Area': 0.05, 'Perimeter': 1.30, 'Rows': 4 },
+                       {'MCC': -0.189, 'Area': 0.23, 'Perimeter': 1.95, 'Rows': 7 },
+                       {'MCC': 0.0, 'Area': 0.325, 'Perimeter': 2.25, 'Rows': 9 } ]
 
+        genome_bin, _ = self.instantiate_bin()
+        genome_bin.ComputeCloudPurity()
 
+        ''' Test each entry saved by the ComputeCloudPurity() function '''
+        for exp_dict, obs_dict in zip(exp_scores, genome_bin._iteration_scores):
 
-    """
-    def ComputeCloudPurity(self):
+            self.assertTrue( np.isclose(exp_dict['MCC'], obs_dict['MCC'], atol=3))
+            self.assertTrue( np.isclose(exp_dict['Area'], obs_dict['Area'], atol=3) )
+            self.assertTrue( np.isclose(exp_dict['Perimeter'], obs_dict['Perimeter'], atol=3) )
 
-        for frame_slice in self._get_next_slice():
+            self.assertIn('Key', obs_dict)
+            obs_slice = genome_bin._slice_df_lookup[ obs_dict['Key'] ]
+            self.assertEqual( exp_dict['Rows'], obs_slice.shape[0])
 
-            ''' Create a UUID for storing contig records '''
-            slice_key = uuid.uuid4()          
+    def test_ResolveUnstableContigs(self):
 
-            ''' Calculate the MCC '''
-            slice_mcc = self._compute_mcc(frame_slice)
+        ''' Set a list of dicts of expected values '''
+        exp_bins = set(['bin_1'])
+        exp_contigs = set(['contig_1', 'contig_3'])
 
-            ''' Record the perimeter and area of the point slice.
-                Note that these are special cases of the ConvexHull for a 2D shape. If we project to more dimensions, this will no longer be valid '''
-            q_hull = ConvexHull( frame_slice[ ['V1', 'V2'] ].values )
-            slice_area = q_hull.volume
-            slice_perimeter = q_hull.area
+        genome_bin, df = self.instantiate_bin()
+        genome_bin.ComputeCloudPurity()
 
-            self._store_quality_values(slice_mcc, slice_key, slice_area, slice_perimeter, frame_slice )
+        mgmr = ThreadManager(2, print)
+        genome_bin.ResolveUnstableContigs({'contig_1': 6, 'contig_2': 1, 'contig_3': 2}, mgmr.queue)
 
-    def ResolveUnstableContigs(self, fragment_count_dict, qManager):
+        ''' Need to package the output, to avoid getting a false negative due to sorting issues '''
+        resolved_contigs = mgmr.results
+        obs_bins = set([ d['Bin'] for d in resolved_contigs ])
+        obs_contigs = set([ d['Contig'] for d in resolved_contigs ])
 
-        ''' Find the key that corresponds to the top MCC, then cast out a list of the ContigBase names within this '''
-        top_df = self._slice_df_lookup[ self.top_key ]
-
-        top_contigs = top_df[ top_df.BinID == self.bin_name ].ContigBase.unique()
-
-        ''' For each fo these contigs, remove it if it does not pass the bias_threshold '''
-        core_contigs = set(top_contigs)
-        for contig in top_contigs:
-
-            contig_fragment_bin_dist = top_df[ top_df.ContigBase == contig ].BinID.value_counts()
-
-            self_fragments = contig_fragment_bin_dist[ self.bin_name ]
-            total_fragments = fragment_count_dict[contig]
-
-            if float(self_fragments) / total_fragments < self.bias_threshold:
-                core_contigs.remove(contig)
-
-        ''' Store dicts of bin/contig, for return to the main process '''
-        for c in core_contigs:
-            qManager.put( { 'Bin': self.bin_name, 'Contig': c } )
-
-    """
+        self.assertSetEqual(exp_bins, obs_bins)
+        self.assertSetEqual(exp_contigs, obs_contigs)
 
     # endregion
 
@@ -219,5 +209,6 @@ if __name__ == '__main__':
     ''' Import the parent path, so that we can import the scripts folder '''
     sys.path.insert(0, '..')
     from scripts.GenomeBin import GenomeBin
+    from scripts.ThreadManager import ThreadManager
 
     unittest.main()
