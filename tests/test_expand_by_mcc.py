@@ -90,6 +90,36 @@ class TestExpandByMcc(unittest.TestCase):
 
     # endregion
 
+    # region Tests for bin refinement functions
+
+    def spawn_contig_fragments(self, save_file=None):
+
+        df = pd.DataFrame([ { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|1', 'V1': 0.1, 'V2': 0.1, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|2', 'V1': 0.4, 'V2': 0.2, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|3', 'V1': 0.5, 'V2': 0.1, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|4', 'V1': 0.2, 'V2': -0.3, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|5', 'V1': 0.3, 'V2': -0.2, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_2', 'ContigName': 'contig_2|1', 'V1': 0.5, 'V2': -0.2, 'BinID': 'bin_2', },
+                            { 'ContigBase': 'contig_1', 'ContigName': 'contig_1|6', 'V1': 0.6, 'V2': -0.3, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_3', 'ContigName': 'contig_3|1', 'V1': 0.6, 'V2': 0.4, 'BinID': 'bin_1', },
+                            { 'ContigBase': 'contig_3', 'ContigName': 'contig_3|2', 'V1': 0.8, 'V2': 0.3, 'BinID': 'bin_1', } ] )
+
+        if save_file:
+            df.to_csv(save_file, sep='\t', index=False)
+            self.temp_file_buffer.append(save_file)
+
+        return df
+
+    def test_count_all_fragments(self):
+
+        df = self.spawn_contig_fragments('mock.txt')
+
+        exp_counts = {'contig_1': 6, 'contig_2': 1, 'contig_3': 2}
+        obs_counts = expand_by_mcc.count_all_fragments('mock.txt')
+
+        self.assertDictEqual(exp_counts, obs_counts)
+
+    # endregion
 if __name__ == '__main__':
 
     ''' Import the expand_by_mcc.py library '''
