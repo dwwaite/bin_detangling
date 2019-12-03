@@ -120,6 +120,7 @@ class TestExpandByMcc(unittest.TestCase):
         self.assertDictEqual(exp_counts, obs_counts)
 
     # endregion
+
 if __name__ == '__main__':
 
     ''' Import the expand_by_mcc.py library '''
