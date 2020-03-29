@@ -73,7 +73,10 @@ class TestGenomeBin(unittest.TestCase):
         genome_bin, df = self.instantiate_bin()
 
         ''' Test all columns are preserved and number of rows persists. Columns should be df + 1 due to the addition of the Distance column '''
-        self.assertListEqual( list(genome_bin.esom_table.columns), ['BinID', 'ContigBase', 'ContigName', 'V1', 'V2', 'Distance'])
+
+        ''' Check columns as a set, so that I do't fail on order '''
+        self.assertSetEqual( set(genome_bin.esom_table.columns), set(['BinID', 'ContigBase', 'ContigName', 'V1', 'V2', 'Distance']) )
+
         self.assertEqual( df.shape[0], genome_bin.esom_table.shape[0] )
         self.assertEqual( df.shape[1] + 1, genome_bin.esom_table.shape[1] )
 
