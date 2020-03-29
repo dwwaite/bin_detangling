@@ -45,7 +45,6 @@ class MachineController():
         self._textMask = {'RF': 'Random forest', 'NN': 'Neural network', 'SVML': 'SVM (linear)', 'SVMR': 'SVM (radial basis function)', 'SVMP': 'SVM (polynomial)'}
         self._model_base = {'RF': None, 'NN': None, 'SVML': None, 'SVMR': None, 'SVMP': None}
         self._models = {'RF': [], 'NN': [], 'SVML': [], 'SVMR': [], 'SVMP': []}
-
         self._accuracy = None
 
         '''
@@ -90,10 +89,10 @@ class MachineController():
     def instantiate_random_forest(self, nTrees, seed = None):
 
         if seed:
-            self._model_base['RF'] = RandomForestClassifier(n_estimators=nTrees, random_state=seed)
+            self._model_base['RF'] = RandomForestClassifier(n_estimators=nTrees, n_jobs=self._threadCount, random_state=seed)
 
         else:
-            self._model_base['RF'] = RandomForestClassifier(n_estimators=nTrees)
+            self._model_base['RF'] = RandomForestClassifier(n_estimators=nTrees, n_jobs=self._threadCount)
 
     def instantiate_neural_network(self, layerSizes, seed = None):
 
@@ -367,31 +366,16 @@ class MachineController():
         conf_results = [None] * n_entries
 
         hit_map = self._map_classes_to_names(_model)
-        
-        '''
-            Flow control for RF vs other models
-            RF does not natively determine a confidence value, whereas the NN and SVM variants all do under the same parameter name.
-        '''
-        if _model_type == 'RF':
 
-            ''' Store an index of the row being classified, so the results are stored in the correct order '''
-            tManager = ThreadManager(self._threadCount, self._calc_confidence_rf)
-            funcArgList = [ (_model, hit_map, i, _data[i,], tManager.queue) for i in range(n_entries) ]
-
-            tManager.ActivateMonitorPool(sleepTime=1, funcArgs=funcArgList)
-
-            for i, hit, conf in tManager.results:
-                call_results[i], conf_results[i] = hit, conf
-
-        else:
-            for i in range(n_entries):
-                call_results[i], conf_results[i] = self._calc_confidence(_model, hit_map, _data[i,])
+        for i in range(n_entries):
+            call_results[i], conf_results[i] = self._calc_confidence(_model, hit_map, _data[i,])
 
         return call_results, conf_results
 
     def _map_classes_to_names(self, model):
         return { i: c for i, c in enumerate(model.classes_) }
 
+    """
     def _calc_confidence_rf(self, args):
 
         _rfModel, _hit_map, _index, _dataRow, _q = args
@@ -405,7 +389,7 @@ class MachineController():
         topHit, topConf = self._extract_top_hit(callsDict)
 
         _q.put( (_index, topHit, topConf / nTrees) )
-
+    """
     def _calc_confidence(self, _model, _hit_map, _dataRow):
 
         pred = _model.predict_proba( _dataRow.reshape(1, -1) )[0]
