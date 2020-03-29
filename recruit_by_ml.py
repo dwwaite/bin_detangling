@@ -117,6 +117,11 @@ def parse_user_input():
     parser.add_option('--nn-nodes', help='Comma-separated list of the number of neurons in the input, hidden, and output layers (Default: Input = number of features + 1, Output = number of classification outcomes, Hidden = mean of Input and Output)', dest='nn_nodes', default=None)
 
     options, args = parser.parse_args()
+
+    if len(args) == 0:
+        print('No core contig table provided. Aborting...')
+        sys.exit()
+
     return options, args[0]
 
 def import_user_tables(esom_table_file, core_contig_file):

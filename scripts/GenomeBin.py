@@ -93,9 +93,7 @@ class GenomeBin:
         self.esom_table.reset_index(drop=True, inplace=True)
 
     def _calc_dist(self, xCen, yCen, xPos, yPos):
-        dX = np.array(xCen - xPos)
-        dY = np.array(yCen - yPos)    
-        return np.sqrt( dX ** 2 + dY ** 2 )
+        return np.sqrt( (xCen - xPos) ** 2 + (yCen - yPos) ** 2 )
 
     def _get_next_slice(self):
 
@@ -108,36 +106,24 @@ class GenomeBin:
 
             slice_index = np.sin( x / self.number_of_slices * np.pi/2 ) * n_contigs
             slice_index = int(slice_index)
-            curr_slice = index_list[ slice_index ]
-
-            yield self.esom_table.iloc[ 0:curr_slice, ]
 
             ''' Break the loop if we've hit the end of the curve early.
                 This can happen for the last entry due to int rounding of the index '''
-            if slice_index + 1 == n_contigs:
-                break
+            if slice_index >= n_contigs:
+                yield self.esom_table
+                return
+
+            curr_slice = index_list[ slice_index ]
+            yield self.esom_table.iloc[ 0:curr_slice, ]
+
+        yield self.esom_table
 
     def _compute_mcc(self, slice_df):
 
-        ''' There is an edge case where if there are no false contigs in a bin the MCC encounters a divide by zero.
-                Generally this doesn't matter, because it results in a vector of 0.0 for the MCC, and the larger slice is reported
-                for MCC ties.
-                That said, this should be revised in the future.
-
-        '''
         obs_vector = [0.0] * len( self.mcc_expectation )
-        for i in range(0, slice_df.shape[0]): obs_vector[i] = 1.0
+        obs_vector[ 0 : slice_df.shape[0] ] = [1.0] * slice_df.shape[0]
 
-        '''
-        import warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings('error')
-            try:
-                mcc = ...
-            except:
-                return ...
-        '''
-        return matthews_corrcoef(self.mcc_expectation, obs_vector)
+        return 0.0 if np.prod(obs_vector) == 1 else matthews_corrcoef(self.mcc_expectation, obs_vector)
 
     def _store_quality_values(self, mcc, slice_key, area, perimeter, frame_slice):
 

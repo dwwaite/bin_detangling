@@ -20,13 +20,13 @@ def ValidateFile(inFile, behaviour, fileTypeWarning=None, _callback=None, **kwar
 
         elif behaviour == 'skip':
 
-            print( 'Warning: Unable to detect {} {}, skipping....'.format(fileTypeWarning, inFile) )
+            print( 'Warning: Unable to detect {} {}, skipping...'.format(fileTypeWarning, inFile) )
             return None
 
         elif behaviour == 'abort':
 
-            print( 'Warning: Unable to detect {} {}, aborting....'.format(fileTypeWarning, inFile) )
-            sys.exit()
+            print( 'Warning: Unable to detect {} {}, aborting...'.format(fileTypeWarning, inFile) )
+            return None
 
 def ValidateFolder(inFile, behaviour, fileTypeWarning=None, _callback=None, **kwargs):
 
@@ -58,10 +58,12 @@ def ValidateDataFrameColumns(df, columnsRequired):
 
             assert( reqColumn in df.columns ), reqColumn
 
+        return True
+
     except AssertionError as ae:
 
         print( '\nUnable to find required column {}, aborting...'.format(ae) )
-        sys.exit()
+        return False
 
 # endregion 
 
@@ -130,6 +132,6 @@ def ValidateFloat(userChoice, parameterNameWarning, behaviour, defaultValue=None
         if behaviour == 'abort':
 
             print( 'Unable to accept value {} for {}, aborting...'.format(userChoice, parameterNameWarning, defaultValue) )
-            sys.exit()
+            return None
 
 # endregion
