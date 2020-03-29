@@ -2,7 +2,6 @@
     Class to handle the instantiation, training, validation, archiving and classification of machine learning tools in bin assignment
 
     TODO: Add documentation for the internal variables of MachineController
-    TODO: Implement ThreadManager class to speed up assignment using RandomForest - this will require caching of the SSS data, and running RF in a separate loop to other ML models
 '''
 # General modules
 import sys, os, glob, warnings#, joblib
@@ -11,9 +10,6 @@ from operator import itemgetter
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-
-# My modules
-from scripts.ThreadManager import ThreadManager
 
 # sklearn modules for overhead
 from sklearn.model_selection import StratifiedShuffleSplit
@@ -375,21 +371,6 @@ class MachineController():
     def _map_classes_to_names(self, model):
         return { i: c for i, c in enumerate(model.classes_) }
 
-    """
-    def _calc_confidence_rf(self, args):
-
-        _rfModel, _hit_map, _index, _dataRow, _q = args
-
-        ''' Create a list of the individual calls for each decision tree '''
-        nTrees = len(_rfModel.estimators_)
-        calls = [ _rfModel.estimators_[i].predict( _dataRow.reshape(1, -1) )[0] for i in range(nTrees) ]
-
-        ''' Reshape the data as a dict of occurences, then return the top value and confidence '''
-        callsDict = dict( Counter( [ _hit_map[c] for c in calls ] ) )
-        topHit, topConf = self._extract_top_hit(callsDict)
-
-        _q.put( (_index, topHit, topConf / nTrees) )
-    """
     def _calc_confidence(self, _model, _hit_map, _dataRow):
 
         pred = _model.predict_proba( _dataRow.reshape(1, -1) )[0]
