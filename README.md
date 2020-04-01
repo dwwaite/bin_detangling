@@ -19,14 +19,11 @@ This workflow employs some biology-agnostic clustering techniques to evaluate th
 
 *Note - technically you **could** perform binning with this workflow, but I wouldn't recommend it.*
 
-## Expected data
-
-
-## Preprocessing data
+## Quick-fire use
 
 
 ```bash
-python computeKmerProfile.py -k 4 -t 1 -n yeojohnson --to-esomana tests/kmer.input.chomp1500.fna
+python compute_kmer_profile.py -k 4 -t 1 -n yeojohnson -c binned_contigs.coverage.txt binned_contigs.fna
 
-python gapstat_cluster.py -t 1 --min 2 --max 5 -o XXX -p --convex tests/kmer.input.chomp1500.tsv
+python project_tsne.py -w 0.5 -o binned_contigs.weighted.tsne binned_contigs.tsv
 ```
