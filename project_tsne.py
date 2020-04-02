@@ -36,9 +36,6 @@ def main():
     '''
     feature_table = read_and_validate_table(feature_table_name, options.coverage)
 
-    if not feature_table:
-        sys.exit()
-
     if options.weighting:
         options.weighting = parse_and_validate_weighting(options.weighting)
 
@@ -74,7 +71,7 @@ def read_and_validate_table(ftable_name, cov_prefix):
     exists = ValidateFile(inFile=ftable_name, fileTypeWarning='feature table', behaviour='abort')
 
     if exists is None:
-        return None
+        sys.exit()
 
     ''' If it does, test the contents '''
     ftable = pd.read_csv(ftable_name, sep='\t')
