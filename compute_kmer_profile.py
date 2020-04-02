@@ -13,17 +13,16 @@ from scripts.OptionValidator import ValidateFile, ValidateStringParameter, Valid
 def main():
 
     ''' Set up the options '''
-    usageString = "usage: %prog [options] [contig files]"
+    usageString = "usage: %prog [options] [contig file]"
     parser = OptionParser(usage=usageString)
 
     parser.add_option('-k', '--kmer', help='Kmer size for profiling (Default: 4)', dest='kmer', default=4)
     parser.add_option('-t', '--threads', help='Number of threads to use (Default: 1)', dest='threads', default=1)
     parser.add_option('-n', '--normalise', help='Method for normalising per-column values (Options: unit variance (\'unit\'), Yeo-Johnson (\'yeojohnson\'), None (\'none\'). Default: Unit variance)', dest='normalise', default='unit')
+    parser.add_option('-o', '--output', help='Output file extension for input files (Default: .tsv)', dest='output', default='.tsv')
     parser.add_option('-r', '--ignore-rev-comp', help='Prevent the use of reverse complement kmers to reduce table size (Default: False)', dest='revComp', action='store_false', default=True)
 
-    ''' Options for making this ESOM-ready'''
     parser.add_option('-c', '--coverage', help='Append coverage table to data (Default: None)', dest='coverage', default=None)
-    parser.add_option('--to-esomana', help='Add ESOMana prefix to the output table (Default: False)', dest='esomana', action='store_true', default=False)
 
     options, inputFiles = parser.parse_args()
 
@@ -61,7 +60,7 @@ def main():
 
         ''' Reorder the rows to match the input order '''
         completeDataFrame = OrderRows(completeDataFrame, sequenceIndex)
-        WriteOutputTable(inputFile, completeDataFrame, options.esomana)
+        WriteOutputTable(inputFile, options.output, completeDataFrame)
 
 ###############################################################################
 
@@ -206,43 +205,10 @@ def OrderRows(completeDataFrame, sequenceIndex):
 
     return df.reset_index()
 
-def WriteOutputTable(inputFileName, df, esomanaFlag):
+def WriteOutputTable(inputFileName, output_ext, df):
 
-    outputName = os.path.splitext(inputFileName)[0] + '.tsv'
+    outputName = os.path.splitext(inputFileName)[0] + output_ext
     df.to_csv(outputName, sep='\t', index=False)
-
-    ''' The trick to appending header infomation came from https://stackoverflow.com/questions/29233496/write-comments-in-csv-file-with-pandas '''
-    if esomanaFlag:
-
-        n, m = df.shape
-
-        ''' Write the names file '''
-        outClass = os.path.splitext(inputFileName)[0] + '.names'
-        outputWriterClass = open(outClass, 'w')
-
-        outputWriterClass.write( '%{}\n'.format(n) )
-        for i, c in zip( range(0, n), df.Contig ):
-            outputWriterClass.write( '{}\t{}\n'.format(i, c) )
-
-        outputWriterClass.close()
-
-        ''' Open a stream for the lrn file '''
-        outputName = os.path.splitext(inputFileName)[0] + '.lrn'
-        outputWriter = open(outputName, 'w')
-
-        ''' Write the header for the lrn file '''
-        outputWriter.write( '%{}\n'.format(n) )
-        outputWriter.write( '%{}\n'.format(m) )
-
-        colIndentifiers = [ '1' for x in range(1, m) ]
-        colIndentifiers.insert(0, '9')
-        outputWriter.write( '%{}\n'.format( '\t'.join(colIndentifiers) ) )
-        outputWriter.write( '%' )
-
-        ''' Write out the content of the df file '''
-        df.Contig = [ i for i in range(0, n) ]
-        df.to_csv(outputWriter, sep='\t', index=False)
-        outputWriter.close()
 
 #endregion
 
