@@ -21,9 +21,30 @@ This workflow employs some biology-agnostic clustering techniques to evaluate th
 
 ## Quick-fire use
 
+Grab a few example genomes:
 
 ```bash
-python compute_kmer_profile.py -k 4 -t 1 -n yeojohnson -c binned_contigs.coverage.txt binned_contigs.fna
+# Campylobacter subantarcticus LMG 24377
+datasets download genome accession GCF_000816305.1 --include genome
 
-python project_tsne.py -w 0.5 -o binned_contigs.weighted.tsne binned_contigs.tsv
+# Campylobacter ureolyticus
+datasets download genome accession GCF_013372225.1 --include genome
+
+# Campylobacter sputorum bv. paraureolyticus LMG 11764
+datasets download genome accession GCF_002220755.1 --include genome
+
+# Campylobacter fetus
+datasets download genome accession GCF_011600945.2 --include genome
+
+# Campylobacter jejuni
+datasets download genome accession GCF_000009085.1 --include genome
+```
+
+```bash
+python bin/compute_kmer_profile.py -k 4 -o kmers.parquet -f fragments.fna -t 4 data/*.fna
+
+#python project_tsne.py -w 0.5 -o binned_contigs.weighted.tsne binned_contigs.tsv
+
+
+
 ```
