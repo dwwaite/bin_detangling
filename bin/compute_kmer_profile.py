@@ -56,8 +56,6 @@ def main():
     final_df = combine_data_frames(fragment_profiles)
     final_df.write_parquet(options.output)
 
-###############################################################################
-
 #region Fasta and sequence handling
 
 def slice_fasta_file(file_path: str, window_size: int, kmer_size: int) -> List[Fragment]:
@@ -124,6 +122,8 @@ def compute_kmer_profile(fragment: Fragment) -> pl.DataFrame:
 
 #endregion
 
+#region Other functions
+
 def write_fragmented_reads(fragment_list: List[Fragment], file_path: str) -> None:
     """ Save the fragmented sequences into a fasta file, using the fragment name as sequence names.
     """
@@ -152,6 +152,7 @@ def combine_data_frames(input_frames: List[pl.DataFrame]) -> pl.DataFrame:
         .sort(by=['Source', 'Contig', 'Fragment', 'Kmer'], descending=False)
     )
 
-###############################################################################
+#endregion
+
 if __name__ == '__main__':
     main()
