@@ -21,30 +21,31 @@ This workflow employs some biology-agnostic clustering techniques to evaluate th
 
 ## Quick-fire use
 
-Grab a few example genomes:
+Using the initial bins produced in the Genomics Aotearoa [Metagenomics Summer School](https://genomicsaotearoa.github.io/metagenomics_summer_school/).
+
+Start by mapping the data to produce the coverage table required for the binning refinement. There are two binned data sets here, the raw bins (`bin_*.fna`), and those that have been through [DAS_Tool](https://github.com/cmks/DAS_Tool) refinement.
+
+### Raw bins
 
 ```bash
-# Campylobacter subantarcticus LMG 24377
-datasets download genome accession GCF_000816305.1 --include genome
+bowtie2-build data/spades_assembly.m1000.fna data/spades_assembly.m1000
 
-# Campylobacter ureolyticus
-datasets download genome accession GCF_013372225.1 --include genome
+for i in {1..4};
+do
+    bowtie2 --sensitive-local --threads 4 -x data/spades_assembly.m1000 -1 data/sample${i}_R1.fastq.gz -2 data/sample${i}_R2.fastq.gz > sample${i}.sam
+    samtools view -bS sample${i}.sam | samtools sort -o sample${i}.bam
+    samtools depth -a sample${i}.bam > sample${i}.depth.txt
+done
 
-# Campylobacter sputorum bv. paraureolyticus LMG 11764
-datasets download genome accession GCF_002220755.1 --include genome
-
-# Campylobacter fetus
-datasets download genome accession GCF_011600945.2 --include genome
-
-# Campylobacter jejuni
-datasets download genome accession GCF_000009085.1 --include genome
+# Create per-contig summary of the depths
+python bin/compute_depth_profile.py -o results/depth.parquet sample{1..4}.depth.txt
 ```
 
+Fortunately, the refined bins have a different extension to the raw versions, so they are easy to sort by wildcard.
+
 ```bash
-python bin/compute_kmer_profile.py -k 4 -o kmers.parquet -f fragments.fna -t 4 data/*.fna
+# Raw bins
+python bin/compute_kmer_profile.py -k 4 -o results/raw_bins.parquet -f results/raw_bins.fna -t 4 data/bin_*.fna
 
-#python project_tsne.py -w 0.5 -o binned_contigs.weighted.tsne binned_contigs.tsv
-
-
-
+python bin/project_ordination.py -n yeojohnson -w 0.5 --store_features results/raw_bins.matrix.tsv -k results/raw_bins.parquet -c results/depth.parquet -o results/raw_bins.tsne.parquet
 ```
