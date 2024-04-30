@@ -23,14 +23,26 @@ class TestComputeKmerProfile(unittest.TestCase):
 
     def test_slice_fasta_file(self):
 
+        # First case - sequence splits into 4 pieces, but final is too short
+        # Second case - sequence splits into 2 pieces, but final is too short
         exp_results = [
-            Fragment('tests/mock_sequence.fna', 'seq_a', 'seq_a__0', Seq('ATC'), 4),
-            Fragment('tests/mock_sequence.fna', 'seq_a', 'seq_a__3', Seq('GAT'), 4),
-            Fragment('tests/mock_sequence.fna', 'seq_a', 'seq_a__6', Seq('CGA'), 4),
-            Fragment('tests/mock_sequence.fna', 'seq_b', 'seq_b__0', Seq('GCT'), 4),
-            Fragment('tests/mock_sequence.fna', 'seq_b', 'seq_b__3', Seq('AGCTA'), 4)
+            Fragment('tests/mock_sequence.fna', 'seq_a', 'seq_a__0', Seq('ATCGA'), 4),
+            Fragment('tests/mock_sequence.fna', 'seq_a', 'seq_a__5', Seq('TCGAT'), 4),
+            Fragment('tests/mock_sequence.fna', 'seq_a', 'seq_a__10', Seq('CGATCG'), 4),
+            Fragment('tests/mock_sequence.fna', 'seq_b', 'seq_b__0', Seq('GCTAGCTA'), 4),
         ]
-        obs_results = slice_fasta_file('tests/mock_sequence.fna', 3, 4)
+        obs_results = slice_fasta_file('tests/mock_sequence.fna', 5, 4)
+
+        self.assertListEqual(exp_results, obs_results)
+
+    def test_slice_fasta_file_short(self):
+
+        # Test for when the sequences are shorter than the window size
+        exp_results = [
+            Fragment('tests/mock_sequence.fna', 'seq_a', 'seq_a__0', Seq('ATCGATCGATCGATCG'), 4),
+            Fragment('tests/mock_sequence.fna', 'seq_b', 'seq_b__0', Seq('GCTAGCTA'), 4),
+        ]
+        obs_results = slice_fasta_file('tests/mock_sequence.fna', 100, 4)
 
         self.assertListEqual(exp_results, obs_results)
 

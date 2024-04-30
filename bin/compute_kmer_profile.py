@@ -68,22 +68,32 @@ def slice_fasta_file(file_path: str, window_size: int, kmer_size: int) -> List[F
 
     for record in SeqIO.parse(file_path, 'fasta'):
 
-        records += [
-            Fragment(
-                source=file_path,
-                contig=record.id,
-                name=f"{record.id}__{i}",
-                seq=record.seq[i:i+window_size],
-                kmer_size=kmer_size
+        if len(record.seq) < window_size:
+            # If the sequence is shorter than the window size, add it as a fragment.
+            records.append(
+                Fragment(source=file_path, contig=record.id, name=f"{record.id}__0", seq=record.seq, kmer_size=kmer_size)
             )
-            for i in range(0, len(record.seq), window_size)
-        ]
 
-        # If the last fragment is shorter than the window_size, remove it and join
-        # to the second to last fragment
-        if len(records[-1].seq) < window_size:
-            final_seq = records.pop(-1)
-            records[-1].seq += final_seq.seq
+        else:
+            # If the length if longer than the window size, break it into fragments
+            fragment_list = [
+                Fragment(
+                    source=file_path,
+                    contig=record.id,
+                    name=f"{record.id}__{i}",
+                    seq=record.seq[i:i+window_size],
+                    kmer_size=kmer_size
+                )
+                for i in range(0, len(record.seq), window_size)
+            ]
+
+            # Assess the last entry, and if the last fragment is shorter than the window_size,
+            # remove it and join to the second to last fragment.
+            if len(fragment_list[-1].seq) < window_size:
+                final_seq = fragment_list.pop(-1)
+                fragment_list[-1].seq += final_seq.seq
+
+            records.extend(fragment_list)
 
     return records
 
