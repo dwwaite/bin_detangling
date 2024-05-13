@@ -3,7 +3,7 @@ import polars as pl
 from polars.testing import assert_frame_equal
 
 from bin.identify_bin_cores import GenomeBin
-from bin.identify_bin_cores import identify_core_members
+from bin.identify_bin_cores import spawn_bin_instances
 from bin.identify_bin_cores import apply_core_members
 
 class TestIdentifyBinCores(unittest.TestCase):
@@ -66,6 +66,28 @@ class TestIdentifyBinCores(unittest.TestCase):
 
         self.assertSetEqual(set([]), obs_results)
 
+    
+    def test_report_core_fragments_list(self):
+
+        # Manually create a messier data set than above. Expectation is that fragment 1_1 is not
+        # recruited to the core.
+        input_df = pl.DataFrame([
+            pl.Series('Source', ['bin_1', 'bin_1', 'bin_2', 'bin_1', 'bin_2', 'bin_3']),
+            pl.Series('Fragment', ['1_1', '1_2', '2_1', '1_3', '2_2', '3_1']),
+            pl.Series('TSNE_1', [1.0, 3.0, 10.0, 4.0, 11.1, 1.1]),
+            pl.Series('TSNE_2', [2.0, 7.0, -1.0, 8.0, -1.1, 2.1])
+        ])
+        input_bins = [GenomeBin(input_df, 'bin_1'), GenomeBin(input_df, 'bin_2'), GenomeBin(input_df, 'bin_3')]
+
+        exp_results = [set(['1_2', '1_3']), set(['2_1', '2_2']), set(['3_1'])]
+
+        for input_bin, exp_result in zip(input_bins, exp_results):
+
+            input_bin.map_mcc_values()
+            obs_result = input_bin.report_core_fragments(0.7)
+
+            self.assertSetEqual(exp_result, obs_result)
+
     def test_identify_centroid(self):
 
         input_df = TestIdentifyBinCores.input_dataframe()
@@ -87,23 +109,21 @@ class TestIdentifyBinCores(unittest.TestCase):
         obs_result = GenomeBin._sort_bin_view(input_df, 'bin_1')
         assert_frame_equal(exp_result, obs_result)
 
+    def test_extract_bin_name(self):
+
+        my_bin = GenomeBin(TestIdentifyBinCores.input_dataframe(), 'bin_1')
+        my_bin.target_bin = 'abc/def.ghi.txt'
+
+        self.assertEqual('def.ghi', GenomeBin.extract_bin_name(my_bin))
+
 #endregion
 
-    def test_identify_core_members(self):
+    def test_spawn_bin_instances(self):
 
-        # Manually create a messier data set than above. Expectation is that fragment 1_1 is not
-        # recruited to the core.
-        input_df = pl.DataFrame([
-            pl.Series('Source', ['bin_1', 'bin_1', 'bin_2', 'bin_1', 'bin_2', 'bin_3']),
-            pl.Series('Fragment', ['1_1', '1_2', '2_1', '1_3', '2_2', '3_1']),
-            pl.Series('TSNE_1', [1.0, 3.0, 10.0, 4.0, 11.1, 1.1]),
-            pl.Series('TSNE_2', [2.0, 7.0, -1.0, 8.0, -1.1, 2.1])
-        ])
-
-        exp_results = set(['1_2', '1_3', '2_1', '2_2', '3_1'])
-        obs_results = identify_core_members(input_df, 0.7)
-
-        self.assertSetEqual(exp_results, obs_results)
+        input_df = TestIdentifyBinCores.input_dataframe()
+        exp_results = [GenomeBin(input_df, 'bin_1'), GenomeBin(input_df, 'bin_2')]
+        obs_results = spawn_bin_instances(input_df)
+        self.assertListEqual(exp_results, obs_results)
 
     def test_apply_core_members(self):
 

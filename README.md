@@ -48,4 +48,8 @@ Fortunately, the refined bins have a different extension to the raw versions, so
 python bin/compute_kmer_profile.py -k 4 -o results/raw_bins.parquet -f results/raw_bins.fna -t 4 data/bin_*.fna
 
 python bin/project_ordination.py -n yeojohnson -w 0.5 --store_features results/raw_bins.matrix.tsv -k results/raw_bins.parquet -c results/depth.parquet -o results/raw_bins.tsne.parquet
+
+python bin/identify_bin_cores.py --threshold 0.8 --plot_traces -i results/raw_bins.tsne.parquet -o results/raw_bins.tsne_core.parquet
 ```
+
+---

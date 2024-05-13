@@ -1,12 +1,11 @@
-#import sys, os
-#import pandas as pd
-#from multiprocessing import Pool
-from dataclasses import dataclass, field
+import os
 from optparse import OptionParser
 from typing import List, Tuple, Set
+from dataclasses import dataclass, field
 
 import numpy as np
 import polars as pl
+import plotly.express as px
 from sklearn.metrics import matthews_corrcoef
 
 @dataclass
@@ -15,11 +14,19 @@ class GenomeBin:
     target_bin: str
     mcc_values: list[float] = field(default_factory=list)
 
-    def __init__(self, df: pl.DataFrame, target_bin: str):
+    def __init__(self, df: pl.DataFrame, target_bin: str) -> 'GenomeBin':
 
         self.coordinates = GenomeBin._sort_bin_view(df, target_bin)
         self.target_bin = target_bin
         self.mcc_values = [0.0] * df.shape[0]
+
+    def __eq__(self, other_bin: 'GenomeBin') -> bool:
+
+        coord_eq = self.coordinates.equals(other_bin.coordinates)
+        target_eq = self.target_bin == other_bin.target_bin
+        mcc_eq = self.mcc_values == other_bin.mcc_values
+
+        return coord_eq & target_eq & mcc_eq
 
     def map_mcc_values(self) -> None:
         """ Identify the contig fragments required to build a minimum viable bin core. Sets the value
@@ -52,11 +59,42 @@ class GenomeBin:
             return set(
                 self.coordinates
                 .with_columns(pl.Series('mask', retain_mask))
-                .filter(
-                    pl.col('mask')
-                )
+                .filter(pl.col('mask'))
                 .get_column('Fragment')
             )
+
+    def plot_mcc_trace(self, core_fragments: Set[str], bin_name: str, file_path: str) -> None:
+        """ Produce a bar plot of the MCC values of the bin, denoting the threshold and membership of each contig.
+        """
+
+        # Apply additional plotting columns to the core DataFrame
+        plot_df = (
+            self
+            .coordinates
+            .with_columns(
+                pl.Series('x_values', [i+1 for i in range(0, len(self.mcc_values))]),
+                pl.when(
+                    pl.col('Source').eq(self.target_bin),
+                    pl.col('Fragment').is_in(core_fragments)
+                )
+                .then(pl.lit('Target (core)'))
+                .when(pl.col('Source').eq(self.target_bin))
+                .then(pl.lit('Target (non-core)'))
+                .otherwise(pl.lit('Non-target'))
+                .alias('x_colours')
+            )
+        )
+
+        fig = px.bar(
+            x=plot_df['x_values'], y=self.mcc_values, color=plot_df['x_colours'],
+            title=f"MCC progression: {bin_name}",
+            labels={
+                'x': 'Contig inclusion',
+                'y': 'MCC',
+                'colour': 'Classification'
+            }
+        )
+        fig.write_html(file_path)
 
     @staticmethod
     def _identify_centroid(df: pl.DataFrame, target_bin: str) -> Tuple[float, float]:
@@ -65,10 +103,7 @@ class GenomeBin:
         return (
             df
             .filter(pl.col('Source').eq(target_bin))
-            .select(
-                pl.col('TSNE_1').median(),
-                pl.col('TSNE_2').median(),
-            )
+            .select(pl.col('TSNE_1').median(), pl.col('TSNE_2').median())
             .row(0)
         )
 
@@ -100,6 +135,17 @@ class GenomeBin:
             .sort('distance', descending=False)
         )
 
+    @staticmethod
+    def extract_bin_name(genome_bin: 'GenomeBin') -> str:
+        """ Strip the genome bin `target_bin` parameter of file path and extension and return the result
+            as a proxy for the bin name.
+        """
+        _, bin_file = os.path.split(genome_bin.target_bin)
+        bin_name, _ = os.path.splitext(bin_file)
+
+        return bin_name
+
+
 def main():
     
     # Set up the options
@@ -107,31 +153,40 @@ def main():
 
     parser.add_option('-i', '--input', help='The output parquet file produced by project_ordination.py', dest='input')
     parser.add_option('--threshold', help='The minimum MCC value for accepting a bin core (Default: 0.8)', dest='threshold', default=0.8, type=float)
+    parser.add_option('--plot_traces', help='Store the MCC traces for each examined bin (Default: False)', action='store_true')
     parser.add_option('-o', '--output', help='An output table with bin cores identified', dest='output')
 
     options, _ = parser.parse_args()
 
-    # Import data and extract the list of bin names
+    # Import data and create GenomeBin records
     df = pl.read_parquet(options.input)
+    bin_instances = spawn_bin_instances(df)
 
-    core_fragments = identify_core_members(df, options.threshold)
+    # Identify the MCC progression and core contigs, then save it required.
+    core_fragments = set()
+
+    for bin_instance in bin_instances:
+
+        bin_instance.map_mcc_values()
+        bin_core = bin_instance.report_core_fragments(options.threshold)
+
+        core_fragments |= bin_core
+
+        if options.plot_traces:
+            bin_name = GenomeBin.extract_bin_name(bin_instance)
+            bin_instance.plot_mcc_trace(bin_core, bin_name, f"{options.output}.{bin_name}.html")
+
+    # Map the results back to the input DataFrame, and store.
     master_df = apply_core_members(df, core_fragments)
     master_df.write_parquet(options.output)
 
-def identify_core_members(df: pl.DataFrame, mcc_threshold: float) -> Set[str]:
-    """ Build a set of the combined fragments over all bins which form the core, respecting
-        the threshold of GenomeBin.report_core_fragments(), then return the total set
-        of fragments.
+def spawn_bin_instances(df: pl.DataFrame) -> List[GenomeBin]:
+    """ Iterate through the input data frame and create an alphabetical list of
+        GenomeBin objects representing the contents.
     """
 
-    core_fragments = set()
-
-    for bin_entry in df.get_column('Source').unique():
-        my_bin = GenomeBin(df, bin_entry)
-        my_bin.map_mcc_values()
-        core_fragments |= my_bin.report_core_fragments(mcc_threshold)
-
-    return core_fragments
+    bin_sequence = sorted(df.get_column('Source').unique())
+    return [GenomeBin(df, bin_entry) for bin_entry in bin_sequence]
 
 def apply_core_members(df: pl.DataFrame, core_names: Set[str]) -> pl.DataFrame:
     """ Attach the core fragment identities to the original DataFrame and return.
