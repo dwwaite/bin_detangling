@@ -67,6 +67,10 @@ class GenomeBin:
         """ Produce a bar plot of the MCC values of the bin, denoting the threshold and membership of each contig.
         """
 
+        target_core = 'Target (core)'
+        target_noncore = 'Target (non-core)'
+        non_target = 'Non-target'
+
         # Apply additional plotting columns to the core DataFrame
         plot_df = (
             self
@@ -77,21 +81,25 @@ class GenomeBin:
                     pl.col('Source').eq(self.target_bin),
                     pl.col('Fragment').is_in(core_fragments)
                 )
-                .then(pl.lit('Target (core)'))
+                .then(pl.lit(target_core))
                 .when(pl.col('Source').eq(self.target_bin))
-                .then(pl.lit('Target (non-core)'))
-                .otherwise(pl.lit('Non-target'))
+                .then(pl.lit(target_noncore))
+                .otherwise(pl.lit(non_target))
                 .alias('x_colours')
             )
         )
 
         fig = px.bar(
-            x=plot_df['x_values'], y=self.mcc_values, color=plot_df['x_colours'],
-            title=f"MCC progression: {bin_name}",
+            x=plot_df['x_values'], y=self.mcc_values, color=plot_df['x_colours'], title=f"MCC progression: {bin_name}",
             labels={
                 'x': 'Contig inclusion',
                 'y': 'MCC',
                 'colour': 'Classification'
+            },
+            color_discrete_map={
+                target_core: 'rgb(0, 136, 55)',
+                target_noncore: 'rgb(166, 219, 160)',
+                non_target: 'rgb(194, 165, 207)'
             }
         )
         fig.write_html(file_path)
