@@ -1,8 +1,6 @@
-import sys, time
-from itertools import chain
+import argparse
 from multiprocessing import Pool
 from dataclasses import dataclass
-from optparse import OptionParser
 from collections import defaultdict
 from typing import Any, Callable, Generator, List
 
@@ -24,19 +22,26 @@ class Fragment:
 def main():
 
     # Set up the options
-    parser = OptionParser()
+    parser = argparse.ArgumentParser()
 
-    parser.add_option('-w', '--window', help='Window size for fragmenting input contigs (Default: 10k)', dest='window', type=int, default=10000)
-    parser.add_option('-k', '--kmer', metavar='KMER_SIZE', help='Kmer size for profiling (Default: 4)', dest='kmer_size', type=int, default=4)
-    parser.add_option('-t', '--threads', help='Number of threads to use (Default: 1)', dest='threads', type=int, default=1)
-    parser.add_option('-o', '--output', help='Output file for k-mer profile results', dest='output')
-    parser.add_option('-f', '--fasta', help='Output file for fragmented fasta sequences', dest='fasta')
+    parser.add_argument(
+        '-w', '--window', type=int, default=10_000,
+        help='Window size for fragmenting input contigs (Default: 10k)'
+    )
+    parser.add_argument(
+        '-k', '--kmer', metavar='KMER_SIZE', dest='kmer_size', type=int, default=4,
+        help='Kmer size for profiling (Default: 4)'
+    )
+    parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads to use (Default: 1)')
+    parser.add_argument('-o', '--output', help='Output file for k-mer profile results')
+    parser.add_argument('-f', '--fasta', help='Output file for fragmented fasta sequences')
+    parser.add_argument('input_files', metavar='FASTA_FILES', nargs='+', help='Fasta files (one per MAG) to be profiled')
 
-    options, input_files = parser.parse_args()
+    options = parser.parse_args()
 
     # Create an input list from the file(s) provided and deploy across the available threads
     fragment_list = []
-    for input_file in input_files:
+    for input_file in options.input_files:
         fragment_list += [fragment for fragment in slice_fasta_file(input_file, options.window, options.kmer_size)]
 
     write_fragmented_reads(fragment_list, options.fasta) 

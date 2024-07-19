@@ -1,4 +1,4 @@
-from optparse import OptionParser
+import argparse
 from sklearn import preprocessing
 from sklearn.manifold import TSNE
 from scipy.spatial.distance import pdist, squareform
@@ -8,26 +8,30 @@ import polars as pl
 def main():
 
     # Parse options
-    parser = OptionParser()
+    parser = argparse.ArgumentParser()
 
-    parser.add_option('-k', '--kmer', help='K-mer count table as input file', dest='kmer')
-    parser.add_option('-c', '--coverage', help='Contig coverage table as input file', dest='coverage')
-    parser.add_option('--load_features', help='Load a pre-computed feature table as input file (optional, skips --kmer and --coverage)', dest='load_features')
-    parser.add_option('--store_features', help='File path to store feature table (optional)', dest='store_features')
+    parser.add_argument('-k', '--kmer', help='K-mer count table as input file')
+    parser.add_argument('-c', '--coverage', help='Contig coverage table as input file')
+    parser.add_argument('--store_features', action='store_true', help='File path to store feature table (optional)')
+    parser.add_argument(
+        '--load_features', action='store_true',
+        help='Load a pre-computed feature table as input file (optional, skips --kmer and --coverage)'
+    )
 
-    parser.add_option(
-        '-n', '--normalise',
-        choices=['unit', 'yeojohnson', 'none'], dest='normalise', default='unit',
+    parser.add_argument(
+        '-n', '--normalise', choices=['unit', 'yeojohnson', 'none'], default='unit',
         help=(
             'Method for normalising per-column values (Options: unit variance (\'unit\'), '
             'Yeo-Johnson (\'yeojohnson\'), None (\'none\'). Default: unit)'
         ),
     )
-    parser.add_option('-w', '--weighting', help='Assign over- or under-representation to the depth columns (Default: uniform weighting)', dest='weighting', default=None, type=float)
+    parser.add_argument(
+        '-w', '--weighting', type=float, default=None,
+        help='Assign over- or under-representation to the depth columns (Default: uniform weighting)'
+    )
+    parser.add_argument('-o', '--output', help='File path to store projected coordinates of the contigs')
 
-    parser.add_option('-o', '--output', help='File path to store projected coordinates of the contigs', dest='output')
-
-    options, _ = parser.parse_args()
+    options = parser.parse_args()
 
     # Either produce a kmer frequency table from the count data, or read a previously saved version
     if options.load_features:
@@ -41,12 +45,7 @@ def main():
 
         # Import the coverage information if required, and append to the k-mer frequency table
         if options.coverage:
-
-            coverage_df = map_coverage_to_fragments(
-                pl.scan_parquet(options.coverage),
-                freq_df
-            )
-
+            coverage_df = map_coverage_to_fragments(pl.scan_parquet(options.coverage), freq_df)
             freq_df = pl.concat([freq_df, coverage_df], how='vertical')
 
         # Project the frequency table into wide format
@@ -102,7 +101,7 @@ def counts_to_frequencies(df: pl.DataFrame) -> pl.DataFrame:
         df
         .with_columns(
             (pl.col('Count') / pl.col('Count').sum()).over('Fragment').alias('Value'),
-            pl.col('Kmer').map_elements(lambda x: f"Freq_{x}").alias('Feature')
+            pl.col('Kmer').map_elements(lambda x: f"Freq_{x}", return_dtype=pl.Utf8).alias('Feature')
         )
         .select('Source', 'Contig', 'Fragment', 'Feature', 'Value')
     )
@@ -123,7 +122,7 @@ def project_to_matrix(df: pl.DataFrame) -> pl.DataFrame:
         df
         .pivot(
             index=['Source', 'Contig', 'Fragment'],
-            columns='Feature',
+            on='Feature',
             values='Value'
         )
         .fill_null(0)

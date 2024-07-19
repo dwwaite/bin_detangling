@@ -1,4 +1,4 @@
-from optparse import OptionParser
+import argparse
 from typing import Generator, List, Tuple
 
 import polars as pl
@@ -6,12 +6,16 @@ import polars as pl
 def main():
 
     # Set up the options
-    parser = OptionParser()
-    parser.add_option('-o', '--output', help='Output file for depth profile results', dest='output')
-    options, input_files = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-o', '--output', help='Output file for depth profile results',)
+    parser.add_argument(
+        'input_files', metavar='MAPPING_FILES', nargs='+',
+        help='Mapping files (bam) for examining coverage profiles'
+    )
+    options = parser.parse_args()
 
     # Process the data
-    depth_frames = [parse_depth_file(file_path, depth_label) for file_path, depth_label in depth_label_generator(input_files)]
+    depth_frames = [parse_depth_file(file_path, depth_label) for file_path, depth_label in depth_label_generator(options.input_files)]
     pl.concat(depth_frames, how='vertical').write_parquet(options.output)
 
 def depth_label_generator(file_paths: List[str]) -> Generator[Tuple[str, str], None, None]:

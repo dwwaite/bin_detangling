@@ -1,5 +1,5 @@
 import os
-from optparse import OptionParser
+import argparse
 from typing import List, Tuple, Set
 from dataclasses import dataclass, field
 
@@ -12,7 +12,7 @@ from sklearn.metrics import matthews_corrcoef
 class GenomeBin:
     coordinates: pl.DataFrame
     target_bin: str
-    mcc_values: list[float] = field(default_factory=list)
+    mcc_values: List[float] = field(default_factory=list)
 
     def __init__(self, df: pl.DataFrame, target_bin: str) -> 'GenomeBin':
 
@@ -133,11 +133,11 @@ class GenomeBin:
         return (
             df
             .with_columns(
-                delta_1=pl.col('TSNE_1').map_elements(lambda v: abs(v - x_value)),
-                delta_2=pl.col('TSNE_2').map_elements(lambda v: abs(v - y_value)),
+                delta_1=pl.col('TSNE_1').map_elements(lambda v: abs(v - x_value), return_dtype=pl.Float64),
+                delta_2=pl.col('TSNE_2').map_elements(lambda v: abs(v - y_value), return_dtype=pl.Float64),
             )
             .with_columns(
-                distance=pl.struct(['delta_1', 'delta_2']).map_elements(lambda x: GenomeBin._calculate_distance(*x.values()))
+                distance=pl.struct(['delta_1', 'delta_2']).map_elements(lambda x: GenomeBin._calculate_distance(*x.values()), return_dtype=pl.Float64)
             )
             .drop('delta_1', 'delta_2')
             .sort('distance', descending=False)
@@ -157,14 +157,14 @@ class GenomeBin:
 def main():
     
     # Set up the options
-    parser = OptionParser()
+    parser = argparse.ArgumentParser()
 
-    parser.add_option('-i', '--input', help='The output parquet file produced by project_ordination.py', dest='input')
-    parser.add_option('--threshold', help='The minimum MCC value for accepting a bin core (Default: 0.8)', dest='threshold', default=0.8, type=float)
-    parser.add_option('--plot_traces', help='Store the MCC traces for each examined bin (Default: False)', action='store_true')
-    parser.add_option('-o', '--output', help='An output table with bin cores identified', dest='output')
+    parser.add_argument('-i', '--input', help='The output parquet file produced by project_ordination.py')
+    parser.add_argument('--threshold', default=0.8, type=float, help='The minimum MCC value for accepting a bin core (Default: 0.8)')
+    parser.add_argument('--plot_traces', action='store_true', help='Store the MCC traces for each examined bin (Default: False)')
+    parser.add_argument('-o', '--output', help='An output table with bin cores identified')
 
-    options, _ = parser.parse_args()
+    options = parser.parse_args()
 
     # Import data and create GenomeBin records
     df = pl.read_parquet(options.input)
