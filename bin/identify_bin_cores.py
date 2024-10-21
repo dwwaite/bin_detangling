@@ -32,6 +32,9 @@ class GenomeBin:
         """ Identify the contig fragments required to build a minimum viable bin core. Sets the value
             of self.mcc_values for the MCC scores for each incremental inclusion of fragments from the
             first to last in the data frame.
+
+            Arguments:
+            none
         """
 
         known_sequence = [b == self.target_bin for b in self.coordinates.get_column('Source')]
@@ -44,6 +47,10 @@ class GenomeBin:
     def report_core_fragments(self, mcc_threshold: float) -> Set[str]:
         """ Returns a set of fragments representing the maximum MCC value for the bin. If this
             value does not surpass the specified threshold, an empty set is returned.
+
+            Arguments:
+            mcc_threshold -- the minimum acceptable Matthew's Correlation Cooefficient to accept a set of
+                             fragments as the core of the bin
         """
 
         max_mcc = max(self.mcc_values)
@@ -64,7 +71,13 @@ class GenomeBin:
             )
 
     def plot_mcc_trace(self, core_fragments: Set[str], bin_name: str, file_path: str) -> None:
-        """ Produce a bar plot of the MCC values of the bin, denoting the threshold and membership of each contig.
+        """ Produce a bar plot of the MCC values of the bin as each fragment in the data set is iteratively
+            included in the core. Output figure marks the cuttoff threshold used and membership of each contig.
+
+            Arguments:
+            core_fragments -- a set of fragment names distinguishing the fragments of the bin core
+            bin_name       -- the name of the bin of which the core has been identified
+            file_path      -- the output path to save the figure of bin puritiy (MCC)
         """
 
         target_core = 'Target (core)'
@@ -107,7 +120,12 @@ class GenomeBin:
     @staticmethod
     def _identify_centroid(df: pl.DataFrame, target_bin: str) -> Tuple[float, float]:
         """ Identify the centroid coordinates for the bin of interest, returning a tuple of the x- and y-coordinates.
+
+            Arguments:
+            df         -- a data frame containing the x- and y-coordinates (TNSE_1 and TSNE_2, respectively)
+            target_bin -- the label for the bin recorded in the Source column of df
         """
+
         return (
             df
             .filter(pl.col('Source').eq(target_bin))
@@ -118,7 +136,12 @@ class GenomeBin:
     @staticmethod
     def _calculate_distance(dist_x: float, dist_y: float) -> float:
         """ Return the diagonal distance between the x- and y-edges of a triangle.
+
+            Arguments:
+            dist_x -- the length of the x-edge, measured from 0
+            dist_y -- the length of the y-edge, measured from 0
         """
+
         return np.sqrt(dist_x ** 2 + dist_y ** 2)
 
     @staticmethod
@@ -126,6 +149,10 @@ class GenomeBin:
         """ Calculate the Pythagorean distance between the TSNE_1 and TSNE_2 coordinates and the
             provided coordinates. The data is then sorted according to ascending distance from the
             coordinates.
+
+            Arguments:
+            df         -- a data frame containing the x- and y-coordinates (TNSE_1 and TSNE_2, respectively)
+            target_bin -- the label for the bin recorded in the Source column of df
         """
 
         x_value, y_value = GenomeBin._identify_centroid(df, target_bin)
@@ -147,12 +174,14 @@ class GenomeBin:
     def extract_bin_name(genome_bin: 'GenomeBin') -> str:
         """ Strip the genome bin `target_bin` parameter of file path and extension and return the result
             as a proxy for the bin name.
+
+            Arguments:
+            genome_bin -- an object of type GenomeBin from which a unique bin name can be extracted
         """
         _, bin_file = os.path.split(genome_bin.target_bin)
         bin_name, _ = os.path.splitext(bin_file)
 
         return bin_name
-
 
 def main():
     
@@ -191,6 +220,9 @@ def main():
 def spawn_bin_instances(df: pl.DataFrame) -> List[GenomeBin]:
     """ Iterate through the input data frame and create an alphabetical list of
         GenomeBin objects representing the contents.
+
+        Arguments:
+        df -- a data frame produced by the `project_ordination.py` script
     """
 
     bin_sequence = sorted(df.get_column('Source').unique())
@@ -198,7 +230,12 @@ def spawn_bin_instances(df: pl.DataFrame) -> List[GenomeBin]:
 
 def apply_core_members(df: pl.DataFrame, core_names: Set[str]) -> pl.DataFrame:
     """ Attach the core fragment identities to the original DataFrame and return.
+
+        Arguments:
+        df         -- a data frame produced by the `project_ordination.py` script
+        core_names -- the unique set of fragment names to be considered core to the bins
     """
+
     return df.with_columns(Core=pl.col('Fragment').is_in(core_names))
 
 if __name__ == '__main__':

@@ -74,6 +74,11 @@ def main():
 def map_coverage_to_fragments(coverage_frame: pl.LazyFrame, kmer_df: pl.DataFrame) -> pl.DataFrame:
     """ Manipulate a coverage file and join according to the contigs and fragments of
         the k-mer frequency plot.
+
+        Arguments:
+        coverage_frame -- a pl.LazyFrame representation of mapping data to be incorporated into the
+                          ordination
+        kmer_df        -- a pl.DataFrame from which the contigs of interest can be extracted
     """
 
     coverage_df = (
@@ -96,7 +101,12 @@ def map_coverage_to_fragments(coverage_frame: pl.LazyFrame, kmer_df: pl.DataFram
 def counts_to_frequencies(df: pl.DataFrame) -> pl.DataFrame:
     """ Scale the k-mer counts within each fragment to frequency values and relabel the columns
         to the form ['Source', 'Contig', 'Fragment', 'Feature', 'Value'].
+
+        Arguments:
+        df -- a pl.DataFrame of k-mer counts to be normalised as frequencies along their respective
+              fragment
     """
+
     return (
         df
         .with_columns(
@@ -108,8 +118,12 @@ def counts_to_frequencies(df: pl.DataFrame) -> pl.DataFrame:
 
 def project_to_matrix(df: pl.DataFrame) -> pl.DataFrame:
     """ Pivot a data frame of form ['Source', 'Contig', 'Fragment', 'Feature', 'Value'], projecting
-        the Feature column to columns with Value as the cells values.
+        the Feature column to columns with Value as the cells values. Fills any gaps with zeroes.
+
+        Arguments:
+        df -- a pl.DataFrame to be pivoted into wide form
     """
+
     feature_order = (
         df
         .get_column('Feature')
@@ -132,6 +146,10 @@ def project_to_matrix(df: pl.DataFrame) -> pl.DataFrame:
 def normalise_matrix(df: pl.DataFrame, method: str) -> pl.DataFrame:
     """ Take a data frame of numberic values and scale according to the method provided ('unit' or
         'yeojohnson').
+
+        Arguments:
+        df     -- the pl.DataFrame of k-mer frequencies to be normalised
+        method -- the normalisation method to be applied to the data
     """
 
     if method == 'unit':
@@ -152,6 +170,11 @@ def normalise_matrix(df: pl.DataFrame, method: str) -> pl.DataFrame:
 def build_weighting_mask(col_names: List[str], cov_weight: float) -> List[float]:
     """ Create a weighting mask for the data frame columns, splitting the specified weight over
         the Depth_* columns, and the remainder of the weight over the remaining (frequency) columns.
+
+        Arguments:
+        col_names  -- a list of all column names in the data
+        cov_weight -- the weighting to be split between the coverage (Depth_*) columns in the data
+                      frame. Residual weighting is shared equally between all k-mer frequencies columns
     """
 
     # Find the indices of the coverage columns
@@ -169,6 +192,11 @@ def build_weighting_mask(col_names: List[str], cov_weight: float) -> List[float]
 def compute_dist(feature_df: pl.DataFrame, weight_coverage: float=None) -> pl.DataFrame:
     """ Compute the Euclidean distances between the rows of the input data, optionally weighting according
         to the user specification. Distances are transformed to a square matrix and converted to pl.DataFrame.
+
+        Arguments:
+        feature_df      -- the pl.DataFrame of features to be used in the ordination distance calculation
+        weight_coverage -- (optional) the weighting to be assigned to coverage, if an even division between
+                           all (frequency and depth) columns is not desired
     """
 
     if weight_coverage:
@@ -183,8 +211,14 @@ def compute_dist(feature_df: pl.DataFrame, weight_coverage: float=None) -> pl.Da
 
 def project_tsne(dist_matrix: pl.DataFrame, label_df: pl.DataFrame, perplexity: int=None, seed: int=None) -> pl.DataFrame:
     """ Project the distance matrix into a randomly-initialised TSNE, then bind in the original columns to
-        create the final output.
-        Accepts optional parameters which can be passed for controlling behaviour during unit testing.
+        create the final output. Accepts optional parameters which can be passed for controlling behaviour during
+        unit testing.
+
+        Arguments:
+        dist_matrix -- a numeric matrix between points for the initial data projection
+        label_df    -- a pl.DataFrame of text values matching the row order of dist_matrix
+        perplexity  -- (optional) a user-specified perplexity value for the TSNE transformer
+        seed        -- (optional) a user-specified random_state for the TSNE transformer
     """
 
     tsne_kwargs = {

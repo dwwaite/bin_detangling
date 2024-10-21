@@ -90,9 +90,8 @@ class TestComputeKmerProfile(unittest.TestCase):
         input_data = [i for i in range(0, 100000)]
         exp_results = [i+1 for i in input_data]
 
-        obs_results = deploy_multithreaded_function(input_data, TestComputeKmerProfile.mock_function, 2, sleep_time=1)
+        obs_results = deploy_multithreaded_function(input_data, TestComputeKmerProfile.mock_function, 2)
         self.assertListEqual(exp_results, obs_results)
-
 
     def test_deploy_multithreaded_kmers(self):
 
@@ -105,8 +104,7 @@ class TestComputeKmerProfile(unittest.TestCase):
         obs_results = deploy_multithreaded_function(
             [Fragment('source', 'contig', 'fragment', 'ATATC', 2)],
             compute_kmer_profile,
-            1,
-            sleep_time=1
+            1
         )
 
         obs_df = obs_results[0]

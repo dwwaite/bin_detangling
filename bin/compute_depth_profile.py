@@ -20,8 +20,12 @@ def main():
 
 def depth_label_generator(file_paths: List[str]) -> Generator[Tuple[str, str], None, None]:
     """ Creates a generator returning tuples of the file path and depth label for each file
-        in the input sequence. 
+        in the input sequence.
+
+        Arguments:
+        file_paths -- a list of each mapping file to be parsed
     """
+
     for i, file_path in enumerate(file_paths):
         yield (file_path, f"Depth_{i+1}")
 
@@ -30,17 +34,19 @@ def parse_depth_file(file_path: str, depth_label: str) -> pl.DataFrame:
         the columns `Contig`, `Coverage`, and `Label`.
         Reports median depth over each contig to allow some weighting to the linkage across contig
         fragments produced under compute_kmer_profile.py.
+
+        Arguments:
+        file_path   -- the path to the `samtools depth` file to be summarised
+        depth_label -- the text alias for the depth instance, to allow traceability between mapping files
+                       and depth dimension in the output file
     """
+
     return (
         pl
         .scan_csv(file_path, separator='\t', has_header=False, new_columns=['Contig', 'pos', 'depth'])
         .group_by(['Contig'])
-        .agg(
-            pl.col('depth').median().alias('Coverage')
-        )
-        .with_columns(
-            Label=pl.lit(depth_label)
-        )
+        .agg(pl.col('depth').median().alias('Coverage'))
+        .with_columns(Label=pl.lit(depth_label))
         .collect()
     )
 
