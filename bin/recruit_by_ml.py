@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Tuple
 import numpy as np
 import polars as pl
 import plotly.express as px
-from joblib import dump
+from joblib import dump, load
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
@@ -153,11 +153,11 @@ def parse_user_arguments() -> Any:
     training_parser.add_argument('-i', '--input', help='Input table produced by project_ordination.py')
     training_parser.add_argument('-o', '--output', help='The output folder for top performing models')
 
-    training_parser.add_argument('-s', '--seed', default=None, help='Random seed for data permutation and model building')
-    training_parser.add_argument('-t', '--threads', default=1, help='Number of threads to use for model training and classification (Default: 1)')
-    training_parser.add_argument('--cross_validate', default=10, help='Perform X-fold cross validation in model building (Default: 10)')
+    training_parser.add_argument('-s', '--seed', default=None, type=int, help='Random seed for data permutation and model building')
+    training_parser.add_argument('-t', '--threads', default=1, type=int, help='Number of threads to use for model training and classification (Default: 1)')
+    training_parser.add_argument('--cross_validate', default=10, type=int, help='Perform X-fold cross validation in model building (Default: 10)')
     training_parser.add_argument(
-        '--test_fraction', default=0.1,
+        '--test_fraction', default=0.1, type=float,
         help=(
             'The fraction of data to be used for testing during cross-fold validation. '
             'Default: 0.1 which may be unstable with smaller data sets.'
@@ -165,8 +165,8 @@ def parse_user_arguments() -> Any:
     )
     training_parser.add_argument('--neural_network', action='store_true', help='Create and apply a neural network model')
     training_parser.add_argument('--random_forest', action='store_true', help='Create and apply a random forest model')
-    training_parser.add_argument('--svm_linear', action='store_true', help='Create and apply a SVM (linear kernal) model')
-    training_parser.add_argument('--svm_radial', action='store_true', help='Create and apply a SVM (radial basis function kernal) model')
+    training_parser.add_argument('--svm_linear', action='store_true', help='Create and apply a SVM (linear kernel) model')
+    training_parser.add_argument('--svm_radial', action='store_true', help='Create and apply a SVM (radial basis function kernel) model')
 
     # TO DO - model-specific arguments
     #parser.add_option('--rf-trees', help='Number of decision trees for random forest classification (Default: 1000)', dest='rf_trees', default=1000)
@@ -174,12 +174,21 @@ def parse_user_arguments() -> Any:
 
     # Subparser for the recruitment workflow
     recruitment_parser = subparsers.add_parser('recruit', help='Apply a set of recruitment models to the data.')
-    recruitment_parser.set_defaults(func=train_models)
+    recruitment_parser.set_defaults(func=recruitment_workflow)
+
+    recruitment_parser.add_argument('-i', '--input', help='Input table produced by project_ordination.py')
+    recruitment_parser.add_argument('-o', '--output', help='The output destination to the scored contig table')
+
+    recruitment_parser.add_argument('--neural_network', default=None, help='Use the specified neural network model to recruit contigs')
+    recruitment_parser.add_argument('--random_forest', default=None, help='Use the specified random forest model to recruit contigs')
+    recruitment_parser.add_argument('--svm_linear', default=None, help='Use the specified SVM (linear) model to recruit contigs')
+    recruitment_parser.add_argument('--svm_radial', default=None, help='Use the specified SVM (RBF) to recruit contigs')
+    recruitment_parser.add_argument('--threshold', default=0.0, type=float, help='Minimum classification probability to accept assignment (Default: 0.0)')
 
     return parser
 
 def training_workflow(args):
-    """ Applies the workflow for the training routine.
+    """ Applies the training workflow to the specified data.
 
         Arguments:
         args               -- arguments namespace passed from the argument parser
@@ -233,8 +242,50 @@ def training_workflow(args):
         )
         build_report_models(clf_dict, model_data, args.output, clf_label)
 
-def recruit_models(args):
-    print("NOT IMPLEMENTED YET!")
+def recruitment_workflow(args):
+    """ Applies the recruitment workflow to the specified data.
+
+        Arguments:
+        args               -- arguments namespace passed from the argument parser
+            input          -- the path for the input contig file
+            output         -- the output path for recruitment table
+            neural_network -- apply neural network model
+            random_forest  -- apply random forest model
+            svm_linear     -- apply SVM with linear kernel
+            svm_radial     -- apply SVM with radial basis function kernel
+            threshold      -- minimum scoring threshold to accept a prediction from an individual model
+    """
+
+    unassigned_df = (
+        pl
+        .scan_parquet(args.input)
+        .filter(~pl.col('Core'))
+        .collect()
+    )
+
+    recruitment_results = []
+
+    if args.random_forest:
+        clf_model = load(args.random_forest)
+        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, 'random_forest'))
+
+    if args.neural_network:
+        clf_model = load(args.neural_network)
+        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, 'neural_network'))
+
+    if args.svm_linear:
+        clf_model = load(args.svm_linear)
+        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, 'svm_linear'))
+
+    if args.svm_radial:
+        clf_model = load(args.svm_radial)
+        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, 'svm_radial'))
+
+    scoring_df = pl.concat(recruitment_results, how='vertical')
+    aggregated_df = aggregate_scores(scoring_df)
+    selection_df = extract_top_score(aggregated_df, threshold=args.threshold)
+
+    selection_df.write_parquet(args.output)
 
 #endregion
 
@@ -357,6 +408,88 @@ def build_report_models(model_instances: Dict[str, Any], model_data: ValidationC
     save_scoring(score_df, f"{output_path}/{output_lbl}.tsv")
     plot_scoring(score_df, f"{output_path}/{output_lbl}.html")
     save_models(model_instances, output_path)
+
+#endregion
+
+#region Model recruitment functions
+
+def proba_to_dataframe(proba_matrix: np.ndarray, class_names: List[str], fragment_column: List[str]) -> pl.DataFrame:
+    """ Convert a raw probability matrix (ndarray) into a labeled pl.DataFrame.
+
+        Arguments:
+        proba_matrix    -- the probability matrix to be captured in the data frame
+        class_names     -- the names of the classes, corresponding to the columns on the proba_matrix
+        fragment_column -- the text labels of the rows, to be bound as column 'Fragment'
+    """
+
+    score_schema = {class_name: pl.Float64 for class_name in class_names}
+
+    return (
+        pl
+        .DataFrame(proba_matrix, schema=score_schema)
+        .with_columns(
+            pl.Series('Fragment', fragment_column)
+        )
+        .unpivot(index='Fragment', variable_name='Bin', value_name='Score')
+    )
+
+def recruit_by_model(clf_model: Any, unassigned_df: pl.DataFrame, model_label: str) -> pl.DataFrame:
+    """ Calculates the probability scores for a set of bin membership predictions and returns a pl.DataFrame
+        summarising the score per fragment/bin prediction.
+
+        Arguments:
+        clf_model     -- a classification model which supports function `predict_proba` and has parameter `classes_`
+        unassigned_df -- a DataFrame containing the data columns the model was trained upon
+        model_label   -- a text label for uniquely identifying the results of this recruitment attempt
+    """
+
+    prediction_data = unassigned_df.select('TSNE_1', 'TSNE_2')
+    prediction_fragments = unassigned_df.get_column('Fragment')
+
+    proba_matrix = clf_model.predict_proba(prediction_data)
+    proba_df = proba_to_dataframe(proba_matrix, clf_model.classes_, prediction_fragments)
+
+    return proba_df.with_columns(Model=pl.lit(model_label))
+
+def aggregate_scores(score_df: pl.DataFrame, pseudocount: float=1e-3) -> pl.DataFrame:
+    """ Computes the product of scores for each fragment/bin combination across all models used then returns
+        the resulting pl.DataFrame with a single score per fragment/bin. Applies a pseudocount to all scores
+        to avoid zeroing out all values.
+
+        Arguments:
+        score_df    -- the concatenated prediction results from all models to be considered
+        pseudocount -- (optional) a pseudocount value to add to all scores and remove 0-values
+    """
+
+    return (
+        score_df
+        .with_columns(Score=pl.col('Score') + pseudocount)
+        .group_by(['Fragment', 'Bin'])
+        .agg(pl.col('Score').product())
+    )
+
+def extract_top_score(df: pl.DataFrame, threshold: float=0.0) -> pl.DataFrame:
+    """ Accepts a DataFrame of artibrary length where columns represent the Fragment name and scores for
+        bin assignments, and returns a DataFrame of the form [Fragment, Top Bin, Bin Score].
+
+        Arguments:
+        df        -- a DataFrame of acceptable input form, most likely produced from the `proba_to_dataframe`
+                     function
+        threshold -- (optional) the minimum aggregate score to accept a match. Classifications which do not meet this
+                     threshold are masked as 'unassigned'
+    """
+
+    return (
+        df
+        .group_by('Fragment')
+        .agg(pl.all().sort_by('Score').last())
+        .with_columns(
+            Bin=pl
+                .when(pl.col('Score').ge(threshold))
+                .then(pl.col('Bin'))
+                .otherwise(pl.lit('unassigned'))
+        )
+    )
 
 #endregion
 

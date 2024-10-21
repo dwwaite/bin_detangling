@@ -187,7 +187,7 @@ def deploy_multithreaded_function(argument_list: List[Any], callback: Callable, 
     """
 
     with Pool(processes=n_threads) as pool:
-            results = pool.map(callback, argument_list)
+        results = pool.map(callback, argument_list)
 
     return results
 

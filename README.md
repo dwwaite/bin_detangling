@@ -52,4 +52,19 @@ python bin/project_ordination.py -n yeojohnson -w 0.5 --store_features results/r
 python bin/identify_bin_cores.py --threshold 0.8 --plot_traces -i results/raw_bins.tsne.parquet -o results/raw_bins.tsne_core.parquet
 ```
 
+From here, machine learning models can be produced against the core fragments for each bin, then used to re-assign additional non-core fragments back to the bin and determine the final state of the contigs.
+
+```bash
+python bin/recruit_by_ml.py train -i results/raw_bins.tsne_core.parquet -o recruitment_example/ --neural_network --random_forest --svm_linear --svm_radial
+
+python bin/recruit_by_ml.py recruit \
+    -i results/raw_bins.tsne_core.parquet \
+    --random_forest recruitment_example/random_forest_0.pkl \
+    --neural_network recruitment_example/neural_network_0.pkl \
+    --svm_linear recruitment_example/svm_linear_0.pkl \
+    --svm_radial recruitment_example/svm_rbf_0.pkl \
+    --threshold 0.8 \
+    -o results/raw_bins.recruited.parquet
+```
+
 ---

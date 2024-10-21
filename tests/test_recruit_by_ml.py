@@ -1,5 +1,5 @@
 import unittest
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import chain, product
 from typing import Any, List, Self
 
@@ -7,15 +7,20 @@ import numpy as np
 import polars as pl
 from polars.testing import assert_frame_equal, assert_series_equal
 
+# Imported in batches refering to classes, training, recruitment
 from bin.recruit_by_ml import ValidationCollection, ValidationSet
 from bin.recruit_by_ml import instantiate_classifiers, train_models, score_models
+from bin.recruit_by_ml import proba_to_dataframe, recruit_by_model, aggregate_scores, extract_top_score
 
 @dataclass
 class MockModel:
 
+    classes_: List[str] = field(default_factory=list)
+
     def __init__(self, value_a: Any=None, value_b: Any=None):
         self.value_a=value_a
         self.value_b=value_b
+        self.classes_ = ['a', 'b', 'c']
 
     def __eq__(self, other):
         return self.value_a == other.value_a and self.value_b == other.value_b
@@ -332,6 +337,132 @@ class TestProjectOrdination(unittest.TestCase):
 
         obs_df = train_models(mock_model, vc)
         assert_frame_equal(exp_df, obs_df)
+
+#endregion
+
+#region Model recruitment functions
+
+    def test_proba_to_dataframe(self):
+        """ Tests the behaviour of the proba_to_dataframe() function with a small data matrix
+            and appropriate column names and fragment labels.
+        """
+
+        fragment_order = ['a', 'b', 'c']
+        bin_order = ['first_col', 'second_col', 'third_col']
+
+        exp_df = pl.DataFrame([
+            pl.Series('Fragment', sorted(fragment_order * 3)),
+            pl.Series('Bin', bin_order * 3),
+            pl.Series('Score', [1., 2., 3., 4., 5., 6., 7., 8., 9.])
+        ])
+
+        input_matrix = np.array([
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9],
+        ])
+
+        obs_df = proba_to_dataframe(input_matrix, bin_order, fragment_order)
+        assert_frame_equal(exp_df, obs_df.sort('Score', descending=False))
+
+    def test_recruit_by_model(self):
+        """ Tests the behaviour of the recruit_by_model() function with a mock clf object
+            to fake the predict_proba() call and classes_ parameter.
+        """
+
+        exp_df = pl.DataFrame([
+            pl.Series('Fragment', ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'] * 3),
+            pl.Series('Bin', ['a'] * 6 + ['b'] * 6 + ['c'] * 6),
+            pl.Series('Score', [1., .2, .2, .9, 0., 0., 0., .8, .8, .1, 0., 0., 0., 0., 0., 0., 1., 1.]),
+            pl.Series('Model', ['test'] * 18),
+        ])
+
+        input_df = pl.DataFrame([
+            pl.Series('Fragment', ['a1', 'a2', 'b1', 'b2', 'c1', 'c2']),
+            pl.Series('TSNE_1', [1., 2., 3., 4., 5., 6.]),
+            pl.Series('TSNE_2', [6., 5., 4., 3., 2., 1.]),
+        ])
+
+        obs_df = recruit_by_model(MockModel(), input_df, 'test')
+        assert_frame_equal(exp_df, obs_df.sort(['Bin', 'Fragment'], descending=False))
+
+    def test_aggregate_scores(self):
+        """ Tests the behaviour of the aggregate_scores() function with a default pseudocount.
+        """
+
+        exp_df = pl.DataFrame([
+            pl.Series('Fragment', ['a', 'b', 'b']),
+            pl.Series('Bin', ['a', 'b', 'c']),
+            pl.Series('Score', [6.005, 20.009, 6.001]),
+        ])
+
+        input_df = pl.DataFrame([
+            pl.Series('Fragment', ['a', 'a', 'b', 'b', 'b']),
+            pl.Series('Bin', ['a', 'a', 'b', 'b', 'c']),
+            pl.Series('Score', [2., 3., 4., 5., 6.]),
+        ])
+
+        obs_df = aggregate_scores(input_df)
+        assert_frame_equal(exp_df, obs_df.sort('Bin', descending=False), check_exact=False, atol=.001)
+
+    def test_aggregate_scores_pseudocount(self):
+        """ Tests the behaviour of the aggregate_scores() function with an altered pseudocount.
+        """
+
+        exp_df = pl.DataFrame([
+            pl.Series('Fragment', ['a', 'b', 'b']),
+            pl.Series('Bin', ['a', 'b', 'c']),
+            pl.Series('Score', [12.0, 30., 7.]),
+        ])
+
+        input_df = pl.DataFrame([
+            pl.Series('Fragment', ['a', 'a', 'b', 'b', 'b']),
+            pl.Series('Bin', ['a', 'a', 'b', 'b', 'c']),
+            pl.Series('Score', [2., 3., 4., 5., 6.]),
+        ])
+
+        obs_df = aggregate_scores(input_df, pseudocount=1)
+        assert_frame_equal(exp_df, obs_df.sort('Bin', descending=False))
+
+    def test_extract_top_score(self):
+        """ Tests the behaviour of the extract_top_score() function with a default reporting
+            threshold (this is effectively no filtering).
+        """
+
+        exp_df = pl.DataFrame([
+            pl.Series('Fragment', ['a', 'b', 'c']),
+            pl.Series('Bin', ['a', 'c', 'c']),
+            pl.Series('Score', [1., 1., .9]),
+        ])
+
+        input_df = pl.DataFrame([
+            pl.Series('Fragment', ['a', 'a', 'b', 'b', 'c']),
+            pl.Series('Bin', ['a', 'b', 'b', 'c', 'c']),
+            pl.Series('Score', [1., .8, .8, 1., .9]),
+        ])
+
+        obs_df = extract_top_score(input_df)
+        assert_frame_equal(exp_df, obs_df.sort('Fragment', descending=False))
+
+    def test_extract_top_score_threshold(self):
+        """ Tests the behaviour of the extract_top_score() function with a modified reporting
+            threshold to exclude values.
+        """
+
+        exp_df = pl.DataFrame([
+            pl.Series('Fragment', ['a', 'b', 'c']),
+            pl.Series('Bin', ['a', 'c', 'unassigned']),
+            pl.Series('Score', [1., 1., .9]),
+        ])
+
+        input_df = pl.DataFrame([
+            pl.Series('Fragment', ['a', 'a', 'b', 'b', 'c']),
+            pl.Series('Bin', ['a', 'b', 'b', 'c', 'c']),
+            pl.Series('Score', [1., .8, .8, 1., .9]),
+        ])
+
+        obs_df = extract_top_score(input_df, threshold=0.95)
+        assert_frame_equal(exp_df, obs_df.sort('Fragment', descending=False))
 
 #endregion
 
