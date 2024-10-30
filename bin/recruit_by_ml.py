@@ -1,7 +1,7 @@
 import argparse
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Counter, Dict, List, Tuple
 
 import numpy as np
 import polars as pl
@@ -256,9 +256,9 @@ def recruitment_workflow(args):
             threshold      -- minimum scoring threshold to accept a prediction from an individual model
     """
 
+    core_lf = pl.scan_parquet(args.input)
     unassigned_df = (
-        pl
-        .scan_parquet(args.input)
+        core_lf
         .filter(~pl.col('Core'))
         .collect()
     )
@@ -285,7 +285,9 @@ def recruitment_workflow(args):
     aggregated_df = aggregate_scores(scoring_df)
     selection_df = extract_top_score(aggregated_df, threshold=args.threshold)
 
-    selection_df.write_parquet(args.output)
+    assignment_df = build_assignment_table(core_lf, selection_df.lazy())
+    output_df = finalise_recruitment(assignment_df)
+    output_df.write_csv(args.output, separator='\t')
 
 #endregion
 
@@ -489,6 +491,60 @@ def extract_top_score(df: pl.DataFrame, threshold: float=0.0) -> pl.DataFrame:
                 .then(pl.col('Bin'))
                 .otherwise(pl.lit('unassigned'))
         )
+    )
+
+def build_assignment_table(core_lf: pl.LazyFrame, recruit_lf: pl.LazyFrame) -> pl.DataFrame:
+    """ Consolidate the original core recruitment data and assigned bin membership for each fragment.
+        Original bin assignment (Source) is used for core fragments, and the assigned bin is used for
+        non-core fragments.
+
+        Arguments:
+        core_lf    -- the lazy representation of the core mapping data
+        recruit_lf -- the lazy representation of the fragment assignment table
+    """
+
+    return (
+        core_lf
+        .join(recruit_lf, on='Fragment', how='left')
+        .with_columns(
+            Bin=pl
+                .when(pl.col('Core'))
+                .then(pl.col('Source'))
+                .otherwise(pl.col('Bin'))
+        )
+        .select('Source', 'Contig', 'Fragment', 'Bin')
+        .collect()
+    )
+
+def get_top_bin(bin_series: pl.Series) -> Dict[str, float]:
+    """ Tally the unique entries in a Series and return a pl.Struct representing the most abundant
+        selection and the frequency at which is occurs in the Series.
+
+        Arguments:
+        bin_series -- a series or iterable of string values
+    """
+
+    sorted_counts = Counter(bin_series).most_common()
+    top_bin, abund = sorted_counts[0]
+
+    return {'Bin': top_bin, 'Support': abund / len(bin_series)}
+
+def finalise_recruitment(df: pl.DataFrame) -> pl.DataFrame:
+    """ Collect the consensus bin membership for each contig in the pl.DataFrame and report
+        the original and new bin.
+
+        Arguments:
+        df -- a combined data frame containing the Source, Contig, and Bin columns
+    """
+
+    return (
+        df
+        .group_by(['Source', 'Contig'])
+        .agg(
+            pl.col('Bin').map_elements(lambda x: get_top_bin(x), return_dtype=pl.Struct)
+        )
+        .unnest('Bin')
+        .sort(['Source', 'Contig'], descending=[False, False])
     )
 
 #endregion

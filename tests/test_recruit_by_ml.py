@@ -10,7 +10,8 @@ from polars.testing import assert_frame_equal, assert_series_equal
 # Imported in batches refering to classes, training, recruitment
 from bin.recruit_by_ml import ValidationCollection, ValidationSet
 from bin.recruit_by_ml import instantiate_classifiers, train_models, score_models
-from bin.recruit_by_ml import proba_to_dataframe, recruit_by_model, aggregate_scores, extract_top_score
+from bin.recruit_by_ml import proba_to_dataframe, recruit_by_model, aggregate_scores
+from bin.recruit_by_ml import extract_top_score, build_assignment_table, get_top_bin, finalise_recruitment
 
 @dataclass
 class MockModel:
@@ -463,6 +464,132 @@ class TestProjectOrdination(unittest.TestCase):
 
         obs_df = extract_top_score(input_df, threshold=0.95)
         assert_frame_equal(exp_df, obs_df.sort('Fragment', descending=False))
+
+    def test_build_assignment_table(self):
+        """ Tests the behaviour of the build_assignment_table() function with a mix of core
+            and non-core fragments.
+        """
+
+        core_lf = pl.DataFrame([
+            pl.Series('Source', ['a', 'a', 'b', 'b']),
+            pl.Series('Contig', ['a1', 'a2', 'b1', 'b2']),
+            pl.Series('Fragment', ['a_1', 'a_2', 'b_1', 'b_2']),
+            pl.Series('Core', [True, False, True, False]),
+
+        ]).lazy()
+
+        recruit_lf = pl.DataFrame([
+            pl.Series('Fragment', ['a_2', 'b_2']),
+            pl.Series('Bin', ['a', 'c']),
+        ]).lazy()
+
+        exp_df = pl.DataFrame([
+            pl.Series('Source', ['a', 'a', 'b', 'b']),
+            pl.Series('Contig', ['a1', 'a2', 'b1', 'b2']),
+            pl.Series('Fragment', ['a_1', 'a_2', 'b_1', 'b_2']),
+            pl.Series('Bin', ['a', 'a', 'b', 'c']),
+        ])
+
+        obs_df = build_assignment_table(core_lf, recruit_lf)
+        assert_frame_equal(exp_df, obs_df)
+
+    def test_build_assignment_table_core(self):
+        """ Tests the behaviour of the build_assignment_table() function with only core
+            fragments.
+        """
+
+        core_lf = pl.DataFrame([
+            pl.Series('Source', ['a', 'a', 'b', 'b']),
+            pl.Series('Contig', ['a1', 'a2', 'b1', 'b2']),
+            pl.Series('Fragment', ['a_1', 'a_2', 'b_1', 'b_2']),
+            pl.Series('Core', [True, True, True, True]),
+
+        ]).lazy()
+
+        recruit_lf = pl.DataFrame([
+            pl.Series('Fragment', ['a_1', 'a_2', 'b_1', 'b_2']),
+            pl.Series('Bin', ['x', 'x', 'x', 'x']),
+        ]).lazy()
+
+        exp_df = pl.DataFrame([
+            pl.Series('Source', ['a', 'a', 'b', 'b']),
+            pl.Series('Contig', ['a1', 'a2', 'b1', 'b2']),
+            pl.Series('Fragment', ['a_1', 'a_2', 'b_1', 'b_2']),
+            pl.Series('Bin', ['a', 'a', 'b', 'b']),
+        ])
+
+        obs_df = build_assignment_table(core_lf, recruit_lf)
+        assert_frame_equal(exp_df, obs_df)
+
+    def test_build_assignment_table_noncore(self):
+        """ Tests the behaviour of the build_assignment_table() function with only non-core
+            fragments.
+        """
+
+        core_lf = pl.DataFrame([
+            pl.Series('Source', ['a', 'a', 'b', 'b']),
+            pl.Series('Contig', ['a1', 'a2', 'b1', 'b2']),
+            pl.Series('Fragment', ['a_1', 'a_2', 'b_1', 'b_2']),
+            pl.Series('Core', [False, False, False, False]),
+
+        ]).lazy()
+
+        recruit_lf = pl.DataFrame([
+            pl.Series('Fragment', ['a_1', 'a_2', 'b_1', 'b_2']),
+            pl.Series('Bin', ['w', 'x', 'y', 'z']),
+        ]).lazy()
+
+        exp_df = pl.DataFrame([
+            pl.Series('Source', ['a', 'a', 'b', 'b']),
+            pl.Series('Contig', ['a1', 'a2', 'b1', 'b2']),
+            pl.Series('Fragment', ['a_1', 'a_2', 'b_1', 'b_2']),
+            pl.Series('Bin', ['w', 'x', 'y', 'z']),
+        ])
+
+        obs_df = build_assignment_table(core_lf, recruit_lf)
+        assert_frame_equal(exp_df, obs_df)
+
+    def test_get_top_bin(self):
+        """ Test the behaviour for the get_top_bin() function when there is a clear
+            winning assignment.
+        """
+
+        input_series = pl.Series('Bin', ['a', 'a', 'b', 'a', 'c'])
+        exp_dict = {'Bin': 'a', 'Support': 0.6}
+
+        obs_dict = get_top_bin(input_series)
+        self.assertDictEqual(exp_dict, obs_dict)
+
+    def test_get_top_bin_draw(self):
+        """ Test the behaviour for the get_top_bin() function when there are are multiple competing
+            options. Expectation is the first entry encountered will be returned.
+        """
+
+        input_series = pl.Series('Bin', ['a', 'a', 'b', 'b', 'c'])
+        exp_dict = {'Bin': 'a', 'Support': 0.4}
+
+        obs_dict = get_top_bin(input_series)
+        self.assertDictEqual(exp_dict, obs_dict)
+
+    def test_finalise_recruitment(self):
+        """ Test the behaviour for the finalise_recruitment() function.
+        """
+
+        input_df = pl.DataFrame([
+            pl.Series('Source', ['a', 'a', 'a', 'a', 'b', 'b', 'b']),
+            pl.Series('Contig', ['a1', 'a1', 'a1', 'a1', 'b1', 'b2', 'b2']),
+            pl.Series('Bin', ['a', 'a', 'a', 'b', 'b', 'b', 'c']),
+        ])
+
+        exp_df = pl.DataFrame([
+            pl.Series('Source', ['a', 'b', 'b']),
+            pl.Series('Contig', ['a1', 'b1', 'b2']),
+            pl.Series('Bin', ['a', 'b', 'b']),
+            pl.Series('Support', [0.75, 1.0, 0.5])
+        ])
+
+        obs_df = finalise_recruitment(input_df)
+        assert_frame_equal(exp_df, obs_df)
 
 #endregion
 

@@ -25,7 +25,9 @@ Using the initial bins produced in the Genomics Aotearoa [Metagenomics Summer Sc
 
 Start by mapping the data to produce the coverage table required for the binning refinement. There are two binned data sets here, the raw bins (`bin_*.fna`), and those that have been through [DAS_Tool](https://github.com/cmks/DAS_Tool) refinement.
 
-### Raw bins
+### Preparing the sequence data
+
+Running through the data with the raw (pre-[DAS_Tool](https://github.com/cmks/DAS_Tool)) bins.
 
 ```bash
 bowtie2-build data/spades_assembly.m1000.fna data/spades_assembly.m1000
@@ -43,8 +45,9 @@ python bin/compute_depth_profile.py -o results/depth.parquet sample{1..4}.depth.
 
 Fortunately, the refined bins have a different extension to the raw versions, so they are easy to sort by wildcard.
 
+### Identifying cores and recruiting residual fragments
+
 ```bash
-# Raw bins
 python bin/compute_kmer_profile.py -k 4 -o results/raw_bins.parquet -f results/raw_bins.fna -t 4 data/bin_*.fna
 
 python bin/project_ordination.py -n yeojohnson -w 0.5 --store_features results/raw_bins.matrix.tsv -k results/raw_bins.parquet -c results/depth.parquet -o results/raw_bins.tsne.parquet
@@ -64,7 +67,99 @@ python bin/recruit_by_ml.py recruit \
     --svm_linear recruitment_example/svm_linear_0.pkl \
     --svm_radial recruitment_example/svm_rbf_0.pkl \
     --threshold 0.8 \
-    -o results/raw_bins.recruited.parquet
+    -o results/raw_bins.recruited.tsv
 ```
+
+### Inspecting the outputs
+
+This output file can now be parsed to write out new bins with the resolved contigs, with or without filtering on the support level. For example:
+
+```python
+import polars as pl
+from Bio import SeqIO
+
+asm_dict = SeqIO.to_dict(SeqIO.parse('data/spades_assembly.m1000.fna', 'fasta'))
+
+df = (
+    pl
+    .scan_csv('results/raw_bins.recruited.tsv', separator='\t')
+    .filter(
+        pl.col('Bin').ne('unassigned')
+        #pl.col('Support').ge(0.9)
+    )
+    .collect()
+)
+
+for (bin_path,), bin_df in df.group_by(['Bin']):
+    new_path = bin_path.replace('.fna', '.refined.fna')
+    with open(new_path, 'w') as bin_writer:
+        for contig in bin_df.get_column('Contig'):
+            _ = SeqIO.write(asm_dict[contig], bin_writer, 'fasta')
+```
+
+It might also help to compare the TSNE ordination with the original bin assignments and the core/recruited bins.
+
+```python
+import plotly.express as px
+import polars as pl
+
+df = (
+    pl
+    .read_parquet('results/raw_bins.tsne_core.parquet')
+    .join(
+        pl.read_csv('results/raw_bins.recruited.tsv', separator='\t'),
+        on='Contig',
+        how='left'
+    )
+    .with_columns(
+        Bin_original=pl.col('Source'),
+        Bin_core=pl
+            .when(pl.col('Core'))
+            .then(pl.col('Source'))
+            .otherwise(pl.col('Bin')),
+        Bin_recruited=pl.col('Bin')
+    )
+    .select('Bin_original', 'Bin_core', 'Bin_recruited', 'TSNE_1', 'TSNE_2')
+)
+
+# Slice and stack the data frame for faceting
+plot_df = pl.concat([
+    df.select('TSNE_1', 'TSNE_2', pl.col('Bin_original').alias('Bin')).with_columns(Label=pl.lit('Bin_original')),
+    df.select('TSNE_1', 'TSNE_2', pl.col('Bin_core').alias('Bin')).with_columns(Label=pl.lit('Bin_core')),
+    df.select('TSNE_1', 'TSNE_2', pl.col('Bin_recruited').alias('Bin')).with_columns(Label=pl.lit('Bin_recruited')),
+])
+
+# Set colours using ColorBrewer2.org, 10 qualitative colours and half-transparency,
+# manually setting 'unassigned' to grey.
+colour_map = {
+    'data/bin_0.fna': 'rgba(166, 206, 227, 0.5)',
+    'data/bin_1.fna': 'rgba(31, 120, 180, 0.5)',
+    'data/bin_2.fna': 'rgba(178, 223, 138, 0.5)',
+    'data/bin_3.fna': 'rgba(51, 160, 44, 0.5)',
+    'data/bin_4.fna': 'rgba(251, 154, 153, 0.5)',
+    'data/bin_5.fna': 'rgba(227, 26, 28, 0.5)',
+    'data/bin_6.fna': 'rgba(253, 191, 111, 0.5)',
+    'data/bin_7.fna': 'rgba(255, 127, 0, 0.5)',
+    'data/bin_8fna': 'rgba(202, 178, 214, 0.5)',
+    'data/bin_9.fna': 'rgba(106, 61, 154, 0.5)',
+    'unassigned': 'rgba(100, 100, 100, 0.5)',
+}
+
+fig = px.scatter(
+    x=plot_df['TSNE_1'],
+    y=plot_df['TSNE_2'],
+    color=plot_df['Bin'],
+    facet_col=plot_df['Label'],
+    color_discrete_map=colour_map,
+    width=1800,
+    height=600,
+    labels=dict(x='', y='', color='Bin')
+)
+fig.for_each_annotation(lambda a: a.update(text=a.text.split('=')[-1]))
+fig.write_image('img/raw_bins_recruitment.svg')
+
+```
+
+![Raw bins, core bins, and bins following trained recruitment](img/raw_bins_recruitment.svg)
 
 ---
