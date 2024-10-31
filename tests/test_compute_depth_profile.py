@@ -23,7 +23,7 @@ class TestComputeDepthProfile(unittest.TestCase):
 
         exp_df = pl.DataFrame([
             pl.Series('Contig', ['a', 'b', 'c']),
-            pl.Series('Coverage', [5, 4, 10.5]),
+            pl.Series('Coverage', [5.0, 4.0, 10.5]),
             pl.Series('Label', ['Depth_1', 'Depth_1', 'Depth_1'])
         ])
 

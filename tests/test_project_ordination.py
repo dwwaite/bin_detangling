@@ -40,8 +40,8 @@ class TestProjectOrdination(unittest.TestCase):
             pl.Series('Contig', ['a1', 'b1', 'b1', 'c1']),
             pl.Series('Fragment', ['a1_1', 'b1_1', 'b1_2', 'c1_1']),
             pl.Series('Freq_AAAA', [0.5, 0.25, 1.0, 1.0]),
-            pl.Series('Freq_AAAC', [0.5, 0.25, 0, 0]),
-            pl.Series('Freq_AAAG', [0, 0.5, 0, 0])
+            pl.Series('Freq_AAAC', [0.5, 0.25, 0.0, 0.0]),
+            pl.Series('Freq_AAAG', [0.0, 0.5, 0.0, 0.0])
         ])
 
 # region Normalisation and transformation
@@ -189,7 +189,7 @@ class TestProjectOrdination(unittest.TestCase):
         ])
 
         obs_df = project_tsne(input_dist, label_df, perplexity=2, seed=5)
-        assert_frame_equal(exp_df, obs_df, check_dtype=False)
+        assert_frame_equal(exp_df, obs_df, check_dtypes=False)
 
 # endregion
 
