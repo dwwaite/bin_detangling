@@ -129,50 +129,6 @@ process bwt2_map_reads {
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    Processes - Read mapping with minimap2
-
-    minimap2=2.28
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-
-/*
-process minimap_index_assembly {
-
-    conda "${projectDir}/envs/mapping.yaml"
-    label "low_cpu"
-
-    input:
-    file assembly_fna
-
-    output:
-    path assembly_mmi
-
-    script:
-    assembly_mmi = "asm_index.mmi"
-    """
-    minimap2 -d ${assembly_mmi} ${assembly_fna}
-    """
-}
-
-process minimap_map_reads {
-
-    conda "${projectDir}/envs/mapping.yaml"
-
-    input:
-    path index_file
-    each tuple val(pair_id), path(reads)
-
-    output:
-    path sam_file
-
-    script:
-    sam_file = "${pair_id}.sam"
-    """
-    minimap2 -t ${task.cpus} -ax sr ${index_file} ${reads[0]} ${reads[1]} > ${sam_file}
-    """
-}
-*/
-
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Processes - Mapping summary
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
