@@ -1,0 +1,6 @@
+name: nextflow
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - nextflow=24.10.0

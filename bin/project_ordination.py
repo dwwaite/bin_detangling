@@ -12,7 +12,7 @@ def main():
 
     parser.add_argument('-k', '--kmer', help='K-mer count table as input file')
     parser.add_argument('-c', '--coverage', help='Contig coverage table as input file')
-    parser.add_argument('--store_features', action='store_true', help='File path to store feature table (optional)')
+    parser.add_argument('--store_features', help='File path to store feature table (optional)')
     parser.add_argument(
         '--load_features', action='store_true',
         help='Load a pre-computed feature table as input file (optional, skips --kmer and --coverage)'

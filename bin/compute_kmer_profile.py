@@ -35,7 +35,7 @@ def main():
     )
     parser.add_argument('-t', '--threads', type=int, default=1, help='Number of threads to use (Default: 1)')
     parser.add_argument('-o', '--output', help='Output file for k-mer profile results')
-    parser.add_argument('-f', '--fasta', help='Output file for fragmented fasta sequences')
+    parser.add_argument('-f', '--fasta', help='Output file for fragmented fasta sequences (optional)')
     parser.add_argument('input_files', metavar='FASTA_FILES', nargs='+', help='Fasta files (one per MAG) to be profiled')
 
     options = parser.parse_args()
@@ -45,7 +45,8 @@ def main():
     for input_file in options.input_files:
         fragment_list += [fragment for fragment in slice_fasta_file(input_file, options.window, options.kmer_size)]
 
-    write_fragmented_reads(fragment_list, options.fasta) 
+    if options.fasta:
+        write_fragmented_reads(fragment_list, options.fasta) 
 
     # Spawn and execute background processes if required, otherwise compute kmers in the main process
     if options.threads > 1:

@@ -10,6 +10,13 @@ Tools that I used when working in the microbial ecology space:
 
 This workflow employs some biology-agnostic clustering techniques to evaluate the evidence for bin formation and membership and is not intended as a replacement for any of these tools. These scripts are for refining problematic bins and ensuring the quality of bins obtained from these software suites.
 
+## Contents
+
+1. [Quick-fire use](#quick-fire-use)
+1. [Inspecting the outputs](#inspecting-the-outputs)
+1. [Automating the process with Nextflow](#automating-the-process-with-nextflow)
+1. [Future improvements](#future-improvements)
+
 ---
 
 ## Quick-fire use
@@ -61,19 +68,18 @@ From here, machine learning models can be produced against the core fragments fo
 ```bash
 python bin/recruit_by_ml.py train --neural_network --random_forest --svm_linear --svm_radial \
     -i results/raw_bins.tsne_core.parquet \
-    -o recruitment_example/
+    -o example/
 
 python bin/recruit_by_ml.py recruit \
     -i results/raw_bins.tsne_core.parquet \
-    --random_forest recruitment_example/random_forest_0.pkl \
-    --neural_network recruitment_example/neural_network_0.pkl \
-    --svm_linear recruitment_example/svm_linear_0.pkl \
-    --svm_radial recruitment_example/svm_rbf_0.pkl \
+    --models example/random_forest_0.pkl example/neural_network_0.pkl example/svm_linear_0.pkl example/svm_rbf_0.pkl \
     --threshold 0.8 \
     -o results/raw_bins.recruited.tsv
 ```
 
-### Inspecting the outputs
+---
+
+## Inspecting the outputs
 
 This output file can now be parsed to write out new bins with the resolved contigs, with or without filtering on the support level. For example:
 
@@ -87,7 +93,7 @@ df = (
     pl
     .scan_csv('results/raw_bins.recruited.tsv', separator='\t')
     .filter(
-        pl.col('Bin').ne('unassigned')
+        pl.col('Bin').ne('unassigned'),
         #pl.col('Support').ge(0.9)
     )
     .collect()
@@ -164,5 +170,39 @@ fig.write_image('img/raw_bins_recruitment.svg')
 ```
 
 ![Raw bins, core bins, and bins following trained recruitment](img/raw_bins_recruitment.svg)
+
+---
+
+## Automating the process with Nextflow
+
+It is also possible to run the entire workflow using the follow Nextflow workflow. This allows customisation of most features within the pipeline through command line arguments. The full set of arguments can be viewed with
+
+```bash
+nextflow run main.nf --help
+```
+
+But to run with reasonably defaults:
+
+```bash
+nextflow run main.nf -with-conda \
+    --n_cpus 20 \
+    --assembly data/spades_assembly.m1000.fna \
+    --fastq_pattern "data/sample*_R{1,2}.fastq.gz" \
+    --bin_pattern "data/bin_*.fna" \
+    --output refinement_output/
+```
+
+---
+
+## Future improvements
+
+1. Add alternate mapping options (e.g. `minimap2`).
+1. Add multithreading to model training.
+   1. Keep random forest as-is, then pass other models into a thread pool.
+1. Extend the options presented in Nextflow script.
+1. Add [output publishing](https://www.nextflow.io/docs/latest/workflow.html#publishing-outputs) to the Nextflow script (waiting for stability in features). 
+1. Experiment with adding hyperparameter tuning to the workflow.
+   1. This could be done by using `RandomizedSearchCV` and/or `GridSearchCV` instead of the splitting approach.
+   1. Setting initial parameters and sensible ranges for expanding with the grid search might require a lot of test data to understand starting values and ranges. 
 
 ---

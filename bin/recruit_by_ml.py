@@ -179,10 +179,7 @@ def parse_user_arguments() -> Any:
     recruitment_parser.add_argument('-i', '--input', help='Input table produced by project_ordination.py')
     recruitment_parser.add_argument('-o', '--output', help='The output destination to the scored contig table')
 
-    recruitment_parser.add_argument('--neural_network', default=None, help='Use the specified neural network model to recruit contigs')
-    recruitment_parser.add_argument('--random_forest', default=None, help='Use the specified random forest model to recruit contigs')
-    recruitment_parser.add_argument('--svm_linear', default=None, help='Use the specified SVM (linear) model to recruit contigs')
-    recruitment_parser.add_argument('--svm_radial', default=None, help='Use the specified SVM (RBF) to recruit contigs')
+    recruitment_parser.add_argument('-m', '--models', nargs='+', help='Use the specified models to recruit contigs')
     recruitment_parser.add_argument('--threshold', default=0.0, type=float, help='Minimum classification probability to accept assignment (Default: 0.0)')
 
     return parser
@@ -265,21 +262,9 @@ def recruitment_workflow(args):
 
     recruitment_results = []
 
-    if args.random_forest:
-        clf_model = load(args.random_forest)
-        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, 'random_forest'))
-
-    if args.neural_network:
-        clf_model = load(args.neural_network)
-        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, 'neural_network'))
-
-    if args.svm_linear:
-        clf_model = load(args.svm_linear)
-        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, 'svm_linear'))
-
-    if args.svm_radial:
-        clf_model = load(args.svm_radial)
-        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, 'svm_radial'))
+    for model in args.models:
+        clf_model = load(model)
+        recruitment_results.append(recruit_by_model(clf_model, unassigned_df, model))
 
     scoring_df = pl.concat(recruitment_results, how='vertical')
     aggregated_df = aggregate_scores(scoring_df)
