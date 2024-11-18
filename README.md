@@ -44,37 +44,38 @@ do
 done
 
 # Create per-contig summary of the depths
-python bin/compute_depth_profile.py -o results/depth.parquet sample{1..4}.depth.txt
+python bin/compute_depth_profile.py -o depth.parquet sample{1..4}.depth.txt
 ```
 
 ### Identifying cores and recruiting residual fragments
 
 ```bash
-python bin/compute_kmer_profile.py -k 4 -o results/raw_bins.parquet -f results/raw_bins.fna -t 4 data/bin_*.fna
+python bin/compute_kmer_profile.py -k 4 -o raw_bins.parquet -f results/fragments.fna -t 4 data/bin_*.fna
 
 python bin/project_ordination.py -n yeojohnson -w 0.5 \
-    --store_features results/raw_bins.matrix.tsv \
-    -k results/raw_bins.parquet \
-    -c results/depth.parquet \
-    -o results/raw_bins.tsne.parquet
+    --store_features results/feature_matrix.tsv \
+    -k raw_bins.parquet \
+    -c depth.parquet \
+    -o projection.parquet
 
 python bin/identify_bin_cores.py --threshold 0.8 --plot_traces \
-    -i results/raw_bins.tsne.parquet \
-    -o results/raw_bins.tsne_core.parquet
+    -i projection.parquet \
+    -o results/projection_core.parquet
 ```
 
 From here, machine learning models can be produced against the core fragments for each bin, then used to re-assign additional non-core fragments back to the bin and determine the final state of the contigs.
 
 ```bash
-python bin/recruit_by_ml.py train --neural_network --random_forest --svm_linear --svm_radial \
-    -i results/raw_bins.tsne_core.parquet \
+python bin/recruit_by_ml.py train \
+    --neural_network --random_forest --svm_linear --svm_radial \
+    -i results/projection_core.parquet \
     -o example/
 
 python bin/recruit_by_ml.py recruit \
     -i results/raw_bins.tsne_core.parquet \
     --models example/random_forest_0.pkl example/neural_network_0.pkl example/svm_linear_0.pkl example/svm_rbf_0.pkl \
     --threshold 0.8 \
-    -o results/raw_bins.recruited.tsv
+    -o results/recruitment_table.tsv
 ```
 
 ---
