@@ -92,7 +92,7 @@ asm_dict = SeqIO.to_dict(SeqIO.parse('data/spades_assembly.m1000.fna', 'fasta'))
 
 df = (
     pl
-    .scan_csv('results/raw_bins.recruited.tsv', separator='\t')
+    .scan_csv('results/recruitment_table.tsv', separator='\t')
     .filter(
         pl.col('Bin').ne('unassigned'),
         #pl.col('Support').ge(0.9)
@@ -115,9 +115,9 @@ import polars as pl
 
 df = (
     pl
-    .read_parquet('results/raw_bins.tsne_core.parquet')
+    .read_parquet('results/projection_core.parquet')
     .join(
-        pl.read_csv('results/raw_bins.recruited.tsv', separator='\t'),
+        pl.read_csv('results/recruitment_table.tsv', separator='\t'),
         on='Contig',
         how='left'
     )
@@ -166,11 +166,10 @@ fig = px.scatter(
     labels=dict(x='', y='', color='Bin')
 )
 fig.for_each_annotation(lambda a: a.update(text=a.text.split('=')[-1]))
-fig.write_image('img/raw_bins_recruitment.svg')
-
+fig.write_image('img/projection_recruitment.svg')
 ```
 
-![Raw bins, core bins, and bins following trained recruitment](img/raw_bins_recruitment.svg)
+![Raw bins, core bins, and bins following trained recruitment](img/projection_recruitment.svg)
 
 ---
 
