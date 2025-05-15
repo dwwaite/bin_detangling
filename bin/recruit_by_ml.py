@@ -194,6 +194,7 @@ def training_workflow(args):
             cross_validate -- number of data splits to perform fir model training
             test_fraction  -- the fraction of data to be used for model testing
             seed           -- random seed for training models
+            threads        -- the number of threads to use for RF model training
             neural_network -- perform neural network training
             random_forest  -- perform random forest training
             svm_linear     -- perform SVM training for linear function

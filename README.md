@@ -184,7 +184,7 @@ nextflow run main.nf --help
 But to run with reasonably defaults:
 
 ```bash
-nextflow run main.nf -with-conda \
+nextflow run main.nf \
     --n_cpus 20 \
     --assembly data/spades_assembly.m1000.fna \
     --fastq_pattern "data/sample*_R{1,2}.fastq.gz" \
@@ -199,8 +199,7 @@ nextflow run main.nf -with-conda \
 1. Add alternate mapping options (e.g. `minimap2`).
 1. Add multithreading to model training.
    1. Keep random forest as-is, then pass other models into a thread pool.
-1. Extend the options presented in Nextflow script.
-1. Add [output publishing](https://www.nextflow.io/docs/latest/workflow.html#publishing-outputs) to the Nextflow script (waiting for stability in features). 
+1. Extend the options presented in Nextflow script. 
 1. Experiment with adding hyperparameter tuning to the workflow.
    1. This could be done by using `RandomizedSearchCV` and/or `GridSearchCV` instead of the splitting approach.
    1. Setting initial parameters and sensible ranges for expanding with the grid search might require a lot of test data to understand starting values and ranges. 
